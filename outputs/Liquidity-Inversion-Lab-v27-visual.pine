@@ -1,0 +1,1713 @@
+//@version=6
+// Independent experimental reconstruction from observable behavior and the supplied manual.
+// NOT original ManipulationX source. NOT verified equivalent. See README-replica.md.
+// Option 1: R = eligible sweep + LTF inversion; linked HTF origin upgrades R+.
+// C = prior direction + available DOL + fresh 5m/15m retest + LTF inversion.
+// Adjustable conventions remain experimental; filters do not define base R.
+indicator("Liquidity Inversion Lab [experimental 0.27 EN]", "LI Lab 0.27 EN", overlay=true, max_bars_back=5000, max_boxes_count=250, max_lines_count=450, max_labels_count=500)
+
+string Q = "👁 00 ━ QUICK VIEW · SHOW / HIDE"
+string R = "🔄 01A ━ R / R+ SETUP · REVERSAL"
+string C = "➡️ 01B ━ C SETUP · CONTINUATION"
+string F = "🎯 01C ━ FILTERS AND CONFIRMATION"
+string S = "🎨 01D ━ SIGNAL APPEARANCE"
+string G2 = "🧩 02 ━ CHART FVG / iFVG"
+string G3 = "💧 03A ━ SWING LIQUIDITY · $$$ / SWP"
+string G4 = "🕒 04 ━ HTF ZONES · 15m / 1h / 4h"
+string G5 = "🌍 05A ━ SESSION WINDOWS · KILL ZONES"
+string G6 = "📊 06 ━ CONFLUENCE PANEL"
+string G7 = "🏷 07A ━ LABEL SPACING · SHARED DEFAULTS"
+string G3E = "💧 03B ━ EQUAL HIGHS / LOWS"
+string G3L = "📐 03C ━ LRL · TRENDLINE LIQUIDITY"
+string G5A = "🌏 05B ━ ASIA LEVELS"
+string G5L = "🌍 05C ━ LONDON LEVELS"
+string G5N = "🗽 05D ━ NEW YORK LEVELS"
+string G5S = "🔗 05E ━ SMT · CORRELATED PIVOTS"
+string G7D = "☀ 07B ━ DAILY OPEN"
+string G7W = "📅 07C ━ WEEKLY OPEN"
+string G7M = "🗓 07D ━ MONTHLY OPEN"
+string G7P = "↩ 07E ━ PREVIOUS PERIOD LEVELS"
+string G78 = "🕗 07F ━ 8AM CANDLE RANGE"
+string G79 = "🕘 07G ━ 9AM CANDLE RANGE"
+
+string appearanceMode = input.string("Custom", "Appearance preset", options=["Minimal", "Custom"], group=Q, tooltip="Minimal uses plain text for every label. Select Custom to choose separate shapes for R, R+, C, sessions, liquidity, LRL, references. Older history markers remain plain text with fixed directional colors to respect the plot budget. Display only; detection and alerts are unchanged.")
+bool signalsOn = input.bool(true, "Show signals", group=Q, tooltip="Show or hide R/R+/C without changing calculations. Guide: 00 visibility; 01A R, 01B C, 01C filters, 01D appearance; 02 chart FVG; 03 liquidity/LRL; 04 HTF FVG; 05 sessions/SMT; 06 panel; 07 levels and labels. TradingView does not support buttons that jump between settings groups.")
+bool showIFVG = input.bool(true, "Show chart FVG/iFVG", group=Q, tooltip="Display zones from the chart timeframe. Signal calculations are independent.")
+bool showLiquidity = input.bool(true, "Show BSL/SSL liquidity", group=Q, tooltip="Display significant swing levels with horizontal lines.")
+bool showEqual = input.bool(true, "Show equal highs/lows", group=Q, tooltip="Draw approximate EQH/EQL from confirmed swings.")
+bool showLRL = input.bool(true, "Show LRL lines", group=Q, tooltip="Visual control only. LRL formation and alerts are still calculated when lines are hidden.")
+bool htfOn = input.bool(true, "Show HTF FVG zones", group=Q, tooltip="Master display switch for HTF boxes. Contact calculations remain independent.")
+bool showSMT = input.bool(true, "Show SMT", group=Q, tooltip="Display confirmed pivot divergences against the correlated symbol.")
+bool showChecklist = input.bool(false, "Show confluence panel", group=Q, tooltip="Display the checklist for the latest signal or the selected bar.")
+bool watermarkOn = input.bool(true, "Show LI Lab watermark", group=Q, tooltip="Small identifier showing LI Lab and the chart timeframe.")
+bool showLevelTags = input.bool(true, "Show level labels", group=Q, tooltip="Master switch for line and reference labels.")
+bool reversalsOn = input.bool(true, "Enable R/R+ reversals", group=R, tooltip="Enable the laboratory reversal models.")
+bool reversal4h = input.bool(true, "Include 4h FVG in R+", group=R, active=reversalsOn, tooltip="Link R+ to a valid 4h zone at the sweep extreme, even when its boxes are hidden. An unrelated earlier HTF contact does not qualify.")
+bool shortPivotR = input.bool(true, "Allow short pivots as R levels", group=R, active=reversalsOn, tooltip="Add short signal pivots to eligible reversal levels. Enabled by default to preserve the user's matched comparison profile. Disable to restrict R to liquidity swings, EQH/EQL, sessions, prior-day and premarket levels.")
+bool onlyA = input.bool(false, "R: require HTF delivery", group=R, active=reversalsOn, tooltip="Only allow reversals linked to an HTF FVG at the sweep. R+ does not represent a validated probability.")
+int setupTTL = input.int(20, "Reversal setup expiry · bars", minval=1, maxval=200, group=R, active=reversalsOn, tooltip="Maximum bars after the sweep to confirm a reversal.")
+bool continuationsOn = input.bool(true, "Enable C continuations", group=C, tooltip="C requires a prior direction, available DOL, a 5m/15m FVG retracement and inversion of the pullback LTF FVG. Calculated on 30s–3m charts. Bar-count settings use chart candles: the same count covers half the time on 30s compared with 1m.")
+bool continuation5m = input.bool(true, "C from 5m FVG", group=C, active=continuationsOn, tooltip="Enable 5m points of interest aligned with the prior direction.")
+bool continuation15m = input.bool(true, "C from 15m FVG", group=C, active=continuationsOn, tooltip="Enable 15m points of interest. Prefer 15m if both layers qualify on the same bar.")
+string continuationTrendMode = input.string("Confirmed structure", "C prior direction", options=["Confirmed structure", "Manual bias"], group=C, active=continuationsOn, tooltip="Structure uses the latest close above/below a confirmed liquidity swing. Manual bias uses the daily Bullish/Bearish setting; Neutral does not enable C. This is a testable convention, not the author's certified formula.")
+int continuationAge = input.int(12, "C FVG maximum age · source bars", minval=1, maxval=200, group=C, active=continuationsOn, tooltip="Adjustable fresh-zone convention: 12 bars of the 5m/15m source timeframe. Not an author-certified threshold.")
+int continuationTTL = input.int(20, "C pullback expiry · LTF bars", minval=1, maxval=200, group=C, active=continuationsOn, tooltip="Maximum time between POI retest and iFVG confirmation. Cancel C if the zone breaks, direction changes or no DOL remains.")
+string modelPriority = input.string("R first", "When R and C overlap", options=["R first", "C first", "Skip overlap"], group=F, tooltip="Explicit laboratory convention for a close that qualifies for both models. The original script's priority has not been confirmed.")
+string biasInput = input.string("Neutral", "Manual daily bias", options=["Neutral", "Bullish", "Bearish"], group=F, tooltip="Neutral allows both directions; Bullish/Bearish restrict signals to the chosen direction. Review daily.")
+bool volumeFilter = input.bool(false, "Filter by displacement · body/ATR", group=F, tooltip="Hypothesis: require a sufficiently large candle body relative to ATR. This is not an actual volume filter.")
+bool dolFilter = input.bool(false, "Require session DOL", group=F, tooltip="Require an available prior-session level in the signal direction.")
+bool vFilter = input.bool(false, "R: require V-window", group=F, tooltip="Require inversion shortly after the initial reversal sweep.")
+bool smtFilter = input.bool(false, "Require confirmed SMT", group=F, tooltip="Require divergence between confirmed pivots of the chart symbol and its peer.")
+bool allInverse = input.bool(true, "Require all eligible FVG inversions", group=F, tooltip="Model hypothesis: all eligible FVGs in the leg must invert.")
+int vTTL = input.int(3, "V-window · bars", minval=1, maxval=50, group=F, tooltip="Adjustable timing proxy for a fast reversal: up to three bars from the R sweep or C contact by default. Time alone does not measure full V-shape geometry.")
+int legLookback = input.int(40, "Maximum leg lookback", minval=3, maxval=300, group=F, tooltip="Maximum lookback bars when searching for setup FVGs.")
+int signalPivotLeft = input.int(3, "Signal pivot · left bars", minval=1, maxval=50, group=F, tooltip="Left bars for the internal signal pivot.")
+int signalPivotRight = input.int(3, "Signal pivot · right bars", minval=1, maxval=50, group=F, tooltip="Right bars required to confirm the internal pivot.")
+int signalGapAge = input.int(20, "Maximum signal FVG age", minval=1, maxval=100, group=F, tooltip="Maximum FVG age in bars to participate in the setup.")
+float displacementATR = input.float(0.8, "Minimum displacement · body/ATR", minval=0, step=0.1, group=F, tooltip="Experimental threshold for candle-body size relative to ATR.")
+int confluenceTTL = input.int(20, "Recent HTF/SMT window · bars", minval=1, maxval=200, group=F, tooltip="Chart bars during which an HTF contact or SMT event counts as recent.")
+bool killFilter = input.bool(false, "Restrict signals to kill zones", group=F, tooltip="When enabled, only allow signals inside enabled kill-zone windows.")
+int signalLimit = input.int(150, "Maximum signal labels", minval=1, maxval=200, group=S, tooltip="Visual limit for recent labels; does not change calculated signals.")
+bool allHistoryMarkers = input.bool(true, "Show signals across loaded history", group=S, tooltip="Draw fixed historical markers. TradingView limits how many bars are actually loaded.")
+bool visibleSignalTooltips = input.bool(true, "Show confluences on hover", group=S, tooltip="Signals inside the visible chart use hoverable labels. Older signals remain fixed historical markers; scrolling recalculates the visible labels. At most 250 visible signals can have detailed labels at once.")
+color bullColor = input.color(color.rgb(20, 195, 142), "Bullish color", group=S, tooltip="Color of bullish labels and some supporting markers.")
+color bearColor = input.color(color.rgb(255, 70, 78), "Bearish color", group=S, tooltip="Color of bearish labels and some supporting markers.")
+string signalSize = input.string("Small", "Signal label size", options=["Tiny", "Small", "Normal", "Large"], group=S, tooltip="Size of detailed labels attached to visible signals.")
+color signalTextColor = input.color(color.rgb(50, 50, 50), "R/R+/C text color", group=S, tooltip="Text color for C, R and R+ labels.")
+string reversalText = input.string("R", "Reversal label text", group=S, tooltip="Customize reversal text on visible labels.")
+string continuationText = input.string("C", "Continuation label text", group=S, tooltip="Customize continuation text on visible labels.")
+bool recentSignals = input.bool(false, "Recent signals only · display", group=S, tooltip="Reduce the number of recent labels without changing calculations.")
+int recentSignalCount = input.int(2, "Recent signal count", minval=1, maxval=200, group=S, tooltip="Used when Recent signals only is enabled.")
+string tooltipIcons = input.string("Green / red", "Hover icon colors", options=["Green / red", "Blue / orange", "Plain"], group=S, tooltip="TradingView controls the hover window's text colors and font size. These are preset Unicode icon colors; use the panel color inputs for exact custom colors.")
+string rMarker = input.string("Directional", "R marker", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=S, active=appearanceMode == "Custom", tooltip="Choose a shape or plain text with no background. Minimal preset overrides this display setting.")
+string rpMarker = input.string("Directional", "R+ marker", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=S, active=appearanceMode == "Custom", tooltip="Choose a shape or plain text with no background. Minimal preset overrides this display setting.")
+string cMarker = input.string("Directional", "C marker", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=S, active=appearanceMode == "Custom", tooltip="Choose a shape or plain text with no background. Minimal preset overrides this display setting.")
+bool sizeFilter = input.bool(true, "Enable minimum FVG size", group=G2, tooltip="Ignore chart zones smaller than the configured threshold.")
+float minSize = input.float(0.5, "Minimum FVG size", minval=0, step=0.25, group=G2, tooltip="Chart FVG size threshold in the selected unit.")
+string sizeUnit = input.string("Points", "Minimum-size unit", options=["Points", "Ticks", "ATR"], group=G2, tooltip="Points, symbol ticks or multiples of ATR.")
+int gapLimit = input.int(60, "Visible chart FVG limit", minval=5, maxval=80, group=G2, tooltip="Limit visible boxes. Does not directly limit analytical zone state.")
+string gapDisplay = input.string("Fixed compact", "Chart FVG/iFVG display mode", options=["Fixed compact", "Moving compact", "Follow price"], group=G2, tooltip="Affects chart-timeframe FVG/iFVG boxes only. Fixed compact keeps boxes near their origin; Moving compact shows a recent window. Does not change calculations or signals. The 15m, 1h and 4h FVGs have separate controls.")
+int compactGapBars = input.int(12, "Compact width · chart bars", minval=2, maxval=200, group=G2, tooltip="Visual width of compact chart FVG/iFVG boxes. Does not shorten analytical zone validity.")
+string chartGapScope = input.string("Signal-linked only", "Which chart gaps to show", options=["Signal-linked only", "All gaps"], group=G2, tooltip="Default: show only inverted chart FVGs that participated in a confirmed R/R+/C setup. All gaps displays every qualifying chart FVG/iFVG. HTF boxes and the signal engine are independent. Linked boxes appear only when a signal confirms; their left edge shows the earlier gap origin.")
+bool chartGapText = input.bool(true, "Show chart gap text", group=G2, tooltip="Show FVG+/FVG-/iFVG captions inside chart boxes.")
+string chartGapTextSize = input.string("Tiny", "Chart gap text size", options=["Tiny", "Small", "Normal"], group=G2, tooltip="Chart-timeframe boxes only. HTF layers retain their own text sizes.")
+color chartBullGapColor = input.color(color.gray, "Bullish FVG color", group=G2, tooltip="Independent chart zone and caption color.")
+color chartBearGapColor = input.color(color.gray, "Bearish FVG color", group=G2, tooltip="Independent chart zone and caption color.")
+color chartBullInverseColor = input.color(color.rgb(20, 195, 142), "Bullish iFVG color", group=G2, tooltip="Independent chart zone and caption color.")
+color chartBearInverseColor = input.color(color.rgb(255, 70, 78), "Bearish iFVG color", group=G2, tooltip="Independent chart zone and caption color.")
+int chartGapOpacity = input.int(88, "Chart gap transparency · %", minval=0, maxval=100, group=G2, tooltip="0 opaque, 100 transparent. Does not affect HTF zones.")
+int chartGapBorderWidth = input.int(1, "Chart gap border width", minval=0, maxval=4, group=G2, tooltip="Use zero for a borderless chart gap.")
+int pivotLeft = input.int(20, "Liquidity swing · left bars", minval=1, maxval=100, group=G3, tooltip="Left pivot bars used for liquidity, SMT and LRL.")
+int pivotRight = input.int(2, "Liquidity swing · right bars", minval=1, maxval=50, group=G3, tooltip="Right bars required to confirm a swing.")
+int levelLimit = input.int(10, "Stored swing level limit", minval=2, maxval=30, group=G3, tooltip="Limit stored swing levels. Adjust carefully because this can affect sweep detection.")
+float visualSwingATR = input.float(1.5, "Visual significance · range/ATR", minval=0.0, step=0.25, group=G3, tooltip="Visual filter only: swing range divided by ATR(200). The former default 5 hid many confirmed swings; 1.5 shows more context. Set 0 for all confirmed swings. Analytical levels and C/R/R+ rules are unchanged.")
+int visualSwingLimit = input.int(8, "Maximum visible swing lines", minval=1, maxval=20, group=G3, tooltip="Each swing $$$ marker belongs to a line. When this limit removes an older level, its line and labels are removed together.")
+string liquidityTagMode = input.string("$$$", "Swing liquidity label", options=["BSL / SSL", "$$$", "Off"], group=G3, tooltip="$$$ represents resting liquidity at a confirmed swing high/low. Its horizontal line starts at that pivot and ends when price sweeps it.")
+bool showSweepTags = input.bool(true, "Show confirmed sweep markers", group=G3, tooltip="Add a second marker where price sweeps and reclaims a level. It stays linked to the same line and disappears if the level is hidden.")
+string sweepTagText = input.string("SWP", "Sweep marker text", options=["SWP", "$$$"], group=G3, tooltip="SWP distinguishes a sweep event from $$$ resting liquidity. Select $$$ to use the same text for both events.")
+color liquidityHighColor = input.color(color.rgb(255, 125, 125), "High / BSL color", group=G3, tooltip="Color of BSL levels and swing highs.")
+color liquidityLowColor = input.color(color.rgb(82, 214, 164), "Low / SSL color", group=G3, tooltip="Color of SSL levels and swing lows.")
+color sweptColor = input.color(color.rgb(190, 190, 190), "Swept liquidity color", group=G3, tooltip="Line color after a confirmed sweep.")
+string liquidityMarker = input.string("Text only", "Swing liquidity label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G3, active=appearanceMode == "Custom", tooltip="Choose a shape or plain text with no background. Minimal preset overrides this display setting.")
+string sweepMarker = input.string("Text only", "Sweep event label style", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G3, active=appearanceMode == "Custom", tooltip="Choose a shape or plain text with no background. Minimal preset overrides this display setting.")
+int liquidityWidth = input.int(1, "Swing liquidity line width", minval=1, maxval=5, group=G3, tooltip="Visual stroke width only; does not change detection.")
+string liquidityTagSize = input.string("Inherit", "Swing liquidity · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G3, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+string liquidityLineStyle = input.string("Solid", "Swing liquidity · line style", options=["Solid", "Dashed", "Dotted"], group=G3, tooltip="Visual line style only; detection and alerts are unchanged.")
+string sweepTagSize = input.string("Inherit", "Sweep event · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G3, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+int swingHistoryLimit = input.int(40, "Historical swing lines", minval=0, maxval=60, group=G3, tooltip="Retain older drawn swing lines separately from the analytical level limit. Set zero to hide them. They are visual context and do not become new R/C targets. A line stops when its source price is swept.")
+float equalATR = input.float(0.15, "EQH/EQL tolerance · ATR", minval=0, step=0.01, group=G3E, tooltip="Allowed distance between two extremes to classify them as equal.")
+int equalLimit = input.int(2, "Maximum equal-high/low levels", minval=1, maxval=20, group=G3E, tooltip="Limit retained EQH/EQL levels.")
+bool showEqualTags = input.bool(true, "Show EQH/EQL labels", group=G3E, tooltip="Display labels on equal-high/low levels.")
+color equalLevelColor = input.color(color.rgb(255, 162, 36), "EQH / EQL color", group=G3E, tooltip="Color of equal-high/low levels.")
+int equalWidth = input.int(1, "EQH/EQL line width", minval=1, maxval=5, group=G3E, tooltip="Visual stroke width only; does not change detection.")
+string equalMarker = input.string("Text only", "EQH/EQL · label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G3E, active=appearanceMode == "Custom", tooltip="Customize this family independently. Text only has no arrow or background; other families keep their own style. Display only.")
+string equalTagSize = input.string("Inherit", "EQH/EQL · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G3E, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+string equalLineStyle = input.string("Dotted", "EQH/EQL · line style", options=["Solid", "Dashed", "Dotted"], group=G3E, tooltip="Visual line style only; detection and alerts are unchanged.")
+string lrlGeometry = input.string("Balanced", "LRL geometry profile", options=["Balanced", "Custom / v26"], group=G3L, tooltip="Balanced uses 1.5 ATR(14) alignment and 8 ATR(200) cluster range. It accepts wider, approximately aligned structures while still requiring three intact failure swings. Custom / v26 uses the values below (0.5 / 4 by default). This is a provisional geometry convention, not the original formula. LRL availability can affect C model targets.")
+int lrlPoints = input.int(3, "Minimum LRL touch points", minval=3, maxval=6, group=G3L, tooltip="Minimum aligned pivots required to form a line.")
+int lrlVisualLimit = input.int(4, "Visible LRL line limit", minval=1, maxval=8, group=G3L, tooltip="Visual limit to reduce chart clutter.")
+bool allowCross = input.bool(true, "Allow crossing between LRL pivots", group=G3L, tooltip="Allow a candle to cross the diagonal line between pivots. This does NOT allow sweeping the highs/lows that form the LRL; those touch points must remain intact.")
+float lrlTolerance = input.float(0.5, "Custom alignment tolerance · ATR14", minval=0, step=0.1, group=G3L, active=lrlGeometry == "Custom / v26", tooltip="Maximum distance between pivots and the candidate line.")
+float lrlClusterATR = input.float(4.0, "Custom cluster range · ATR200", minval=0.1, step=0.25, group=G3L, active=lrlGeometry == "Custom / v26", tooltip="Adjustable hypothesis: maximum distance between the highest and lowest pivots in the series, in ATR(200) multiples. Not a confirmed original-script threshold.")
+int lrlMaxSpanBars = input.int(240, "LRL cluster maximum span · bars", minval=3, maxval=1000, group=G3L, tooltip="Adjustable hypothesis: touch points must form within this many chart bars.")
+bool showLRLTags = input.bool(true, "Show LRL labels", group=G3L, tooltip="Repeat LRL at the pivots used by each line.")
+color lrlColor = input.color(color.rgb(255, 175, 40), "LRL color", group=G3L, tooltip="Color of LRL lines and labels.")
+string lrlMarker = input.string("Text only", "LRL label style", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G3L, active=appearanceMode == "Custom", tooltip="Choose a shape or plain text with no background. Minimal preset overrides this display setting.")
+int lrlWidth = input.int(1, "LRL line width", minval=1, maxval=5, group=G3L, tooltip="Visual stroke width only; does not change detection.")
+string lrlTagSize = input.string("Inherit", "LRL · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G3L, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+string lrlLineStyle = input.string("Solid", "LRL · line style", options=["Solid", "Dashed", "Dotted"], group=G3L, tooltip="Visual line style only; detection and alerts are unchanged.")
+int lrlStateLimit = input.int(4, "Stored LRL structures · calculation", minval=1, maxval=8, group=G3L, tooltip="Analytical retention cap, independent of visible lines. Default 4 preserves the v26 analytical cap. Changing this can change DOL and C targets; changing the visible line limit cannot.")
+string tf1 = input.timeframe("15", "HTF 1 · 15m", group=G4, tooltip="First closed-bar FVG layer; 15 minutes by default.")
+string tf2 = input.timeframe("60", "HTF 2 · 1h", group=G4, tooltip="Second closed-bar FVG layer; one hour by default.")
+string tf3 = input.timeframe("240", "HTF 3 · 4h", group=G4, tooltip="Third confirmed FVG layer. Control its R+ participation in the R/R+ setup section.")
+string mitigation = input.string("100%", "HTF FVG mitigation threshold", options=["On Touch", "50%", "100%"], group=G4, tooltip="Remove a zone after first touch, midpoint or full mitigation.")
+string mitigationType = input.string("Wicks", "Mitigation source", options=["Wicks", "Close"], group=G4, tooltip="Use wicks or closes to determine zone mitigation.")
+int htfLimit = input.int(6, "Visible active FVGs per timeframe", minval=1, maxval=30, group=G4, tooltip="Limit drawn active boxes only, not calculated FVGs. Increase to inspect older zones that are still active.")
+bool htf1Visible = input.bool(true, "Show 15m boxes", group=G4, tooltip="Independent display control for the first HTF layer.")
+bool htf2Visible = input.bool(true, "Show 1h boxes", group=G4, tooltip="Independent display control for the second HTF layer.")
+bool htf3Visible = input.bool(false, "Show 4h FVG boxes", group=G4, tooltip="Display the third layer. Box visibility does not control R+ participation.")
+bool htf3ShowMitigated = input.bool(false, "Show mitigated 4h FVGs · history", group=G4, tooltip="Retain faded 4h boxes after mitigation. Historical context only; not active FVGs or R+ confluence.")
+int htf3MitigatedLimit = input.int(12, "Visible mitigated 4h FVG limit", minval=1, maxval=30, group=G4, tooltip="Limit retained mitigated 4h boxes for comparison with other indicators.")
+bool htf3Confluence = input.bool(false, "Include 4h in recent-contact diagnostics", group=G4, tooltip="Controls recent-contact diagnostics only. R+ uses its sweep-linked zone and Include 4h FVG in R+.")
+bool htf1Text = input.bool(true, "Show 15m text", group=G4, tooltip="Display the timeframe inside 15m boxes.")
+bool htf2Text = input.bool(true, "Show 1h text", group=G4, tooltip="Display the timeframe inside 1h boxes.")
+bool htf3Text = input.bool(true, "Show 4h text", group=G4, tooltip="Display the timeframe inside 4h boxes.")
+bool htf1Extend = input.bool(false, "Extend 15m boxes", group=G4, tooltip="Extend 15m boxes to the right until mitigation.")
+bool htf2Extend = input.bool(false, "Extend 1h boxes", group=G4, tooltip="Extend 1h boxes to the right until mitigation.")
+bool htf3Extend = input.bool(false, "Extend 4h boxes", group=G4, tooltip="Extend 4h boxes to the right until mitigation.")
+color htf1Color = input.color(color.rgb(126, 170, 220), "15m FVG color", group=G4, tooltip="Customize boxes and text of the first HTF layer.")
+color htf2Color = input.color(color.rgb(190, 153, 220), "1h FVG color", group=G4, tooltip="Customize boxes and text of the second HTF layer.")
+color htf3Color = input.color(color.rgb(226, 181, 95), "4h FVG color", group=G4, tooltip="Customize boxes and text of the third HTF layer.")
+string htf1TextSize = input.string("Tiny", "15m text size", options=["Tiny", "Small", "Normal"], group=G4, tooltip="Label size inside 15m FVGs.")
+string htf2TextSize = input.string("Tiny", "1h text size", options=["Tiny", "Small", "Normal"], group=G4, tooltip="Label size inside 1h FVGs.")
+string htf3TextSize = input.string("Tiny", "4h text size", options=["Tiny", "Small", "Normal"], group=G4, tooltip="Label size inside 4h FVGs.")
+string zone = input.string("America/New_York", "Session timezone", group=G5, tooltip="Use America/New_York for the user's strategy windows.")
+string nyKZ = input.session("0930-1100", "New York · main kill zone", group=G5, tooltip="Main window 09:30–11:00 in the selected timezone.")
+bool useNyExtended = input.bool(false, "Use extended NY window", group=G5, tooltip="Replace the main window with 08:00–12:10.")
+string nyExtendedKZ = input.session("0800-1210", "New York · extended kill zone", group=G5, tooltip="Alternative New York window.")
+string londonKZ = input.session("0230-0400", "London · kill zone", group=G5, tooltip="London window available for the kill-zone filter.")
+bool includeLondonKZ = input.bool(true, "Include London kill zone", group=G5, tooltip="Include the London window when the kill-zone filter is enabled.")
+string asiaKZ = input.session("2000-0000", "Asia · kill zone", group=G5, tooltip="Provisional Asia window; adjust to your actual session.")
+bool includeAsiaKZ = input.bool(true, "Include Asia kill zone", group=G5, tooltip="Include the Asia window when the kill-zone filter is enabled.")
+string asiaSession = input.session("2000-0000", "Asia · level-building session", group=G5, tooltip="Window used to calculate AS H/AS L. Lines appear when the session ends.")
+string londonSession = input.session("0200-0500", "London · level-building session", group=G5, tooltip="Window used to calculate LDN H/LDN L. Lines appear when the session ends.")
+string nySession = input.session("0930-1600", "New York · level-building session", group=G5, tooltip="Window used to calculate NY H/NY L.")
+bool sessionLines = input.bool(true, "Show completed-session levels", group=G5, tooltip="Draw highs/lows of completed sessions.")
+bool showSessionSweepEvents = input.bool(true, "Show inter-session sweeps", group=G5, tooltip="Mark London sweeps of Asia, or New York sweeps of Asia/London. A sweep event is distinct from an available DOL target.")
+int sessionDolHours = input.int(24, "Session DOL maximum age · hours", minval=6, maxval=72, group=G5, tooltip="Only unswept completed-session extremes within this age qualify as session targets. Laboratory parameter, not a confirmed original rule.")
+int visibleSessionLimit = input.int(6, "Visible session line limit", minval=2, maxval=18, group=G5, tooltip="Visual limit only; the session levels used by existing sweep calculations remain stored.")
+bool showSessionTags = input.bool(true, "Show AS/LDN/NY labels", group=G5, tooltip="Display the session name beside its horizontal level.")
+int sessionOpenWidth = input.int(1, "Session open line width", minval=1, maxval=5, group=G5, tooltip="Visual stroke width only; does not change detection.")
+bool showAsiaLevels = input.bool(true, "Show Asia levels", group=G5A, tooltip="Display completed Asia session extremes.")
+bool showAsiaOpen = input.bool(false, "Asia Open · AS O", group=G5A, tooltip="Draw the configured Asia session open; known from its first bar.")
+color asiaKeyColor = input.color(color.rgb(152, 173, 201), "Asia open color", group=G5A, tooltip="Custom color for AS O. High and low colors have separate controls.")
+color asiaHighColor = input.color(color.rgb(142, 162, 191), "Asia / AS high color", group=G5A, inline="asiaHigh", tooltip="Color of this session extreme and its label. Swept levels use Swept liquidity color.")
+int asiaHighWidth = input.int(1, "Width", minval=1, maxval=5, group=G5A, inline="asiaHigh", tooltip="Independent width for this session high/low line.")
+color asiaLowColor = input.color(color.rgb(142, 162, 191), "Asia / AS low color", group=G5A, inline="asiaLow", tooltip="Color of this session extreme and its label. Swept levels use Swept liquidity color.")
+int asiaLowWidth = input.int(1, "Width", minval=1, maxval=5, group=G5A, inline="asiaLow", tooltip="Independent width for this session high/low line.")
+string asiaMarker = input.string("Text only", "Asia · label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G5A, active=appearanceMode == "Custom", tooltip="Customize this family independently. Text only has no arrow or background; other families keep their own style. Display only.")
+string asiaTagSize = input.string("Inherit", "Asia · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G5A, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+string asiaLineStyle = input.string("Solid", "Asia · line style", options=["Solid", "Dashed", "Dotted"], group=G5A, tooltip="Visual line style only; detection and alerts are unchanged.")
+bool showLondonLevels = input.bool(true, "Show London levels", group=G5L, tooltip="Display completed London session extremes.")
+bool showLondonOpen = input.bool(false, "London Open · LDN O", group=G5L, tooltip="Draw the configured London session open.")
+color londonKeyColor = input.color(color.rgb(181, 163, 206), "London open color", group=G5L, tooltip="Custom color for LDN O. High and low colors have separate controls.")
+color londonHighColor = input.color(color.rgb(162, 162, 184), "London / LDN high color", group=G5L, inline="londonHigh", tooltip="Color of this session extreme and its label. Swept levels use Swept liquidity color.")
+int londonHighWidth = input.int(1, "Width", minval=1, maxval=5, group=G5L, inline="londonHigh", tooltip="Independent width for this session high/low line.")
+color londonLowColor = input.color(color.rgb(162, 162, 184), "London / LDN low color", group=G5L, inline="londonLow", tooltip="Color of this session extreme and its label. Swept levels use Swept liquidity color.")
+int londonLowWidth = input.int(1, "Width", minval=1, maxval=5, group=G5L, inline="londonLow", tooltip="Independent width for this session high/low line.")
+string londonMarker = input.string("Text only", "London · label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G5L, active=appearanceMode == "Custom", tooltip="Customize this family independently. Text only has no arrow or background; other families keep their own style. Display only.")
+string londonTagSize = input.string("Inherit", "London · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G5L, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+string londonLineStyle = input.string("Solid", "London · line style", options=["Solid", "Dashed", "Dotted"], group=G5L, tooltip="Visual line style only; detection and alerts are unchanged.")
+bool showNYLevels = input.bool(false, "Show New York levels", group=G5N, tooltip="Display completed New York session extremes.")
+bool showNYOpen = input.bool(false, "New York Open · NY O", group=G5N, tooltip="Draw the configured New York session open.")
+color nyKeyColor = input.color(color.rgb(142, 191, 185), "New York open color", group=G5N, tooltip="Custom color for NY O. High and low colors have separate controls.")
+color nyHighColor = input.color(color.rgb(142, 191, 185), "New York / NY high color", group=G5N, inline="nyHigh", tooltip="Color of this session extreme and its label. Swept levels use Swept liquidity color.")
+int nyHighWidth = input.int(1, "Width", minval=1, maxval=5, group=G5N, inline="nyHigh", tooltip="Independent width for this session high/low line.")
+color nyLowColor = input.color(color.rgb(142, 191, 185), "New York / NY low color", group=G5N, inline="nyLow", tooltip="Color of this session extreme and its label. Swept levels use Swept liquidity color.")
+int nyLowWidth = input.int(1, "Width", minval=1, maxval=5, group=G5N, inline="nyLow", tooltip="Independent width for this session high/low line.")
+string nyMarker = input.string("Text only", "New York · label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G5N, active=appearanceMode == "Custom", tooltip="Customize this family independently. Text only has no arrow or background; other families keep their own style. Display only.")
+string nyTagSize = input.string("Inherit", "New York · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G5N, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+string nyLineStyle = input.string("Solid", "New York · line style", options=["Solid", "Dashed", "Dotted"], group=G5N, tooltip="Visual line style only; detection and alerts are unchanged.")
+string peer = input.symbol("CME_MINI:ES1!", "SMT comparison symbol", group=G5S, tooltip="Correlated comparison instrument; ES1! by default for NQ1!.")
+int smtSyncBars = input.int(8, "Maximum SMT pivot separation · bars", minval=1, maxval=30, group=G5S, tooltip="Both confirmed chart pivots must align in time with two independently confirmed pivots of the correlated symbol.")
+float smtBreakATR = input.float(0.10, "Minimum SMT extension · ATR", minval=0.0, step=0.05, group=G5S, tooltip="Minimum chart-symbol extension beyond its previous extreme to qualify a divergence.")
+int smtWidth = input.int(1, "SMT line width", minval=1, maxval=5, group=G5S, tooltip="Visual stroke width only; does not change detection.")
+color smtBullColor = input.color(color.rgb(20, 195, 142), "Bullish SMT color", group=G5S, tooltip="Color of SMT divergence lines. Historical SMT text keeps fixed directional colors.")
+color smtBearColor = input.color(color.rgb(255, 70, 78), "Bearish SMT color", group=G5S, tooltip="Color of SMT divergence lines. Historical SMT text keeps fixed directional colors.")
+string smtMarker = input.string("Text only", "SMT · label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G5S, active=appearanceMode == "Custom", tooltip="Customize this family independently. Text only has no arrow or background; other families keep their own style. Display only.")
+string smtTagSize = input.string("Inherit", "SMT · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G5S, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+string smtLineStyle = input.string("Dotted", "SMT · line style", options=["Solid", "Dashed", "Dotted"], group=G5S, tooltip="Visual line style only; detection and alerts are unchanged.")
+bool smtLineLabels = input.bool(true, "Show peer name on SMT lines", group=G5S, tooltip="Label confirmed divergence lines with the comparison symbol. Both endpoints are confirmed pivots; the label appears at confirmation, not in advance. Historical plot markers keep fixed colors to stay within the plot limit.")
+bool smtHistoryMarkers = input.bool(true, "Show SMT confirmation-bar text", group=G5S, tooltip="Optional fixed-color SMT text on the confirmation candle. Turn off for only the customizable line labels. The plotted CSV SMT columns follow this display switch; SMT calculations and filters are independent.")
+string panelPosition = input.string("Bottom right", "Panel position", options=["Bottom right", "Top right", "Bottom left", "Top left"], group=G6, active=showChecklist, tooltip="Checklist position on the chart.")
+string panelSize = input.string("Small", "Panel text size", options=["Tiny", "Small", "Normal"], group=G6, active=showChecklist, tooltip="Text size of the confluence table.")
+string inspectMode = input.string("Latest", "Panel inspection mode", options=["Latest", "Selected bar"], group=G6, active=showChecklist, tooltip="Inspect the latest signal or a signal on the selected bar.")
+int inspectTime = input.time(timestamp("25 Sep 2026 09:35 -0400"), "Selected bar time", group=G6, active=showChecklist, tooltip="Use this time marker to inspect a specific signal.")
+bool inspectCallout = input.bool(true, "Show selected-signal callout", group=G6, active=showChecklist, tooltip="Draw a summary callout above the inspected bar.")
+color panelText = input.color(color.white, "Panel text color", group=G6, active=showChecklist, tooltip="Customize checklist text color.")
+color panelBackground = input.color(color.new(color.gray, 25), "Panel background", group=G6, active=showChecklist, tooltip="Customize cell background.")
+color panelBorder = input.color(color.gray, "Panel border color", group=G6, active=showChecklist, tooltip="Customize table border color.")
+color metColor = input.color(color.rgb(20, 195, 142), "Met confluence color ↑", group=G6, active=showChecklist, tooltip="Arrow color for observed criteria.")
+color unmetColor = input.color(color.rgb(255, 70, 78), "Unmet confluence color ×", group=G6, active=showChecklist, tooltip="Cross color for unobserved criteria.")
+string statusSize = input.string("Tiny", "Arrow/cross size", options=["Tiny", "Small", "Normal"], group=G6, active=showChecklist, tooltip="Checklist status-icon size.")
+bool showCR = input.bool(true, "Show 8AM/9AM NY candle ranges", group=G7, tooltip="Draw 8H/8L and 9H/9L from the original hour; these levels become known only after the hourly candle closes.")
+bool showOpenTags = input.bool(true, "Show open-level labels", group=G7, tooltip="Display DO/WO/MO and enabled AS O, LDN O and NY O labels.")
+bool showCRTags = input.bool(true, "Show 8H/8L/9H/9L labels", group=G7, tooltip="Display labels at their origin hour. They appear retrospectively when the hourly candle closes.")
+int openTagOffset = input.int(3, "Right label offset · bars", minval=0, maxval=20, group=G7, tooltip="Separate reference labels from the latest bar.")
+string chartTagSize = input.string("Small", "Chart label size", options=["Tiny", "Small", "Normal"], group=G7, tooltip="Size of AS, LDN, NY, LRL and other level labels.")
+float chartTagGapATR = input.float(0.55, "Chart label spacing · ATR", minval=0.15, maxval=2.0, step=0.05, group=G7, tooltip="Separate labels from candle bodies and wicks. The second sweep-label tier uses more spacing. Display only; no detection changes.")
+color chartTagBackground = input.color(color.rgb(24, 27, 33), "Chart label background", group=G7, tooltip="Dark background behind chart text to improve contrast against candles.")
+int chartTagTransparency = input.int(12, "Label background transparency · %", minval=0, maxval=80, group=G7, tooltip="0 is opaque; 80 makes more of the chart visible through labels.")
+bool showDayOpen = input.bool(true, "Day open · DO", group=G7D, tooltip="Display the symbol's daily candle open.")
+color dayOpenColor = input.color(color.rgb(20, 195, 142), "Day open color · DO", group=G7D, tooltip="Daily open color.")
+int dayWidth = input.int(1, "Day open line width", minval=1, maxval=5, group=G7D, tooltip="Visual stroke width only; does not change detection.")
+string dayMarker = input.string("Text only", "DO · label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G7D, active=appearanceMode == "Custom", tooltip="Customize this family independently. Text only has no arrow or background; other families keep their own style. Display only.")
+string dayTagSize = input.string("Inherit", "DO · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G7D, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+bool showWeekOpen = input.bool(true, "Week open · WO", group=G7W, tooltip="Display the symbol's weekly candle open.")
+bool showNWOG = input.bool(false, "Show NWOG", group=G7W, tooltip="Display the gap between the prior weekly close and the new weekly open. Visual hypothesis; does not affect signals.")
+color weekOpenColor = input.color(color.rgb(88, 165, 235), "Week open color · WO", group=G7W, tooltip="Weekly open color.")
+color nwogColor = input.color(color.rgb(130, 130, 160), "Weekly gap color · NWOG", group=G7W, tooltip="Color of the zone between the prior weekly close and current weekly open.")
+int weekWidth = input.int(1, "Week open line width", minval=1, maxval=5, group=G7W, tooltip="Visual stroke width only; does not change detection.")
+string weekMarker = input.string("Text only", "WO · label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G7W, active=appearanceMode == "Custom", tooltip="Customize this family independently. Text only has no arrow or background; other families keep their own style. Display only.")
+string weekTagSize = input.string("Inherit", "WO · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G7W, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+bool showMonthOpen = input.bool(false, "Month open · MO", group=G7M, tooltip="Add the monthly open.")
+color monthOpenColor = input.color(color.rgb(190, 150, 235), "Month open color · MO", group=G7M, tooltip="Monthly open color.")
+int monthWidth = input.int(1, "Month open line width", minval=1, maxval=5, group=G7M, tooltip="Visual stroke width only; does not change detection.")
+string monthMarker = input.string("Text only", "MO · label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G7M, active=appearanceMode == "Custom", tooltip="Customize this family independently. Text only has no arrow or background; other families keep their own style. Display only.")
+string monthTagSize = input.string("Inherit", "MO · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G7M, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+bool showPriorDay = input.bool(false, "Show prior-day high/low", group=G7P, tooltip="Draw PDH/PDL from the previous daily candle.")
+bool showPriorTags = input.bool(true, "Show prior-period labels", group=G7P, tooltip="Display PDH/PDL and other enabled prior-period labels.")
+bool showPriorWeek = input.bool(false, "Prior-week high/low", group=G7P, tooltip="Add PWH/PWL.")
+bool showPriorMonth = input.bool(false, "Prior-month high/low", group=G7P, tooltip="Add PMH/PML.")
+color priorLevelColor = input.color(color.rgb(160, 160, 170), "Prior-period high/low color", group=G7P, tooltip="Color of PDH/PDL, PWH/PWL and PMH/PML.")
+int priorWidth = input.int(1, "Prior-period line width", minval=1, maxval=5, group=G7P, tooltip="Visual stroke width only; does not change detection.")
+string priorMarker = input.string("Text only", "Prior period · label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G7P, active=appearanceMode == "Custom", tooltip="Customize this family independently. Text only has no arrow or background; other families keep their own style. Display only.")
+string priorTagSize = input.string("Inherit", "Prior period · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G7P, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+bool showCR8 = input.bool(true, "8AM candle range · 8H/8L", group=G78, tooltip="Confirmed at 09:00 NY and drawn from the 08:00 candle.")
+bool showCR8Open = input.bool(false, "8AM candle open · 8O", group=G78, tooltip="Retrospectively display the 08:00 NY candle open beside its confirmed range.")
+color cr8Color = input.color(color.rgb(226, 205, 80), "8AM NY range color", group=G78, tooltip="Color of 8H/8L lines.")
+int cr8Width = input.int(1, "8AM range line width", minval=1, maxval=5, group=G78, tooltip="Visual stroke width only; does not change detection.")
+string cr8Marker = input.string("Text only", "8AM range · label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G78, active=appearanceMode == "Custom", tooltip="Customize this family independently. Text only has no arrow or background; other families keep their own style. Display only.")
+string cr8TagSize = input.string("Inherit", "8AM range · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G78, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+bool showCR9 = input.bool(true, "9AM candle range · 9H/9L", group=G79, tooltip="Confirmed at 10:00 NY and drawn from the 09:00 candle.")
+bool showCR9Open = input.bool(false, "9AM candle open · 9O", group=G79, tooltip="Retrospectively display the 09:00 NY candle open beside its confirmed range.")
+color cr9Color = input.color(color.rgb(245, 160, 55), "9AM NY range color", group=G79, tooltip="Color of 9H/9L lines.")
+int cr9Width = input.int(1, "9AM range line width", minval=1, maxval=5, group=G79, tooltip="Visual stroke width only; does not change detection.")
+string cr9Marker = input.string("Text only", "9AM range · label shape", options=["Directional", "Box", "Circle", "Diamond", "Text only"], group=G79, active=appearanceMode == "Custom", tooltip="Customize this family independently. Text only has no arrow or background; other families keep their own style. Display only.")
+string cr9TagSize = input.string("Inherit", "9AM range · text size", options=["Inherit", "Tiny", "Small", "Normal"], group=G79, tooltip="Inherit uses the shared chart label size. This changes only this family.")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Visual controls preserved from earlier versions; model rules changed in 0.20.
+string resolvedSignalSize = signalSize == "Tiny" ? size.tiny : signalSize == "Small" ? size.small : signalSize == "Large" ? size.large : size.normal
+string resolvedChartTagSize = chartTagSize == "Tiny" ? size.tiny : chartTagSize == "Normal" ? size.normal : size.small
+float atr = ta.atr(14)
+float atr200 = ta.atr(200)
+float resolvedLrlTolerance = lrlGeometry == "Balanced" ? 1.5 : lrlTolerance
+float resolvedLrlCluster = lrlGeometry == "Balanced" ? 8.0 : lrlClusterATR
+f_tagY(float price, int direction, float tier) =>
+    price + direction * math.max(nz(atr, 0.0) * chartTagGapATR * tier, syminfo.mintick * 12 * tier)
+color resolvedTagBackground = color.new(chartTagBackground, chartTagTransparency)
+float gapMinimum = not sizeFilter ? 0.0 : sizeUnit == "Ticks" ? minSize * syminfo.mintick : sizeUnit == "ATR" ? minSize * atr : minSize
+int barMillis = int(timeframe.in_seconds() * 1000)
+
+
+f_visualMode(string requested) =>
+    appearanceMode == "Minimal" ? "Text only" : requested
+f_labelStyle(string requested, int direction) =>
+    string mode = f_visualMode(requested)
+    mode == "Text only" ? label.style_none : mode == "Box" ? label.style_label_center : mode == "Circle" ? label.style_circle : mode == "Diamond" ? label.style_diamond : direction == 1 ? label.style_label_down : label.style_label_up
+f_labelBackground(string requested, color background) =>
+    f_visualMode(requested) == "Text only" ? color(na) : background
+f_tagSize(string requested) =>
+    requested == "Tiny" ? size.tiny : requested == "Small" ? size.small : requested == "Normal" ? size.normal : resolvedChartTagSize
+f_lineStyle(string requested) =>
+    requested == "Dashed" ? line.style_dashed : requested == "Dotted" ? line.style_dotted : line.style_solid
+f_sessionMarker(string caption) =>
+    caption == "AS" ? asiaMarker : caption == "LDN" ? londonMarker : nyMarker
+f_sessionTagSize(string caption) =>
+    f_tagSize(caption == "AS" ? asiaTagSize : caption == "LDN" ? londonTagSize : nyTagSize)
+f_sessionLineStyle(string caption) =>
+    f_lineStyle(caption == "AS" ? asiaLineStyle : caption == "LDN" ? londonLineStyle : nyLineStyle)
+f_referenceMarker(string caption) =>
+    str.contains(caption, "PD") or str.contains(caption, "PW") or str.contains(caption, "PM") ? priorMarker : str.contains(caption, "MO") ? monthMarker : str.contains(caption, "WO") and not str.contains(caption, "DO") ? weekMarker : dayMarker
+f_referenceSize(string caption) =>
+    f_tagSize(str.contains(caption, "PD") or str.contains(caption, "PW") or str.contains(caption, "PM") ? priorTagSize : str.contains(caption, "MO") ? monthTagSize : str.contains(caption, "WO") and not str.contains(caption, "DO") ? weekTagSize : dayTagSize)
+
+f_sessionColor(string caption, int direction) =>
+    caption == "AS" ? (direction == 1 ? asiaHighColor : asiaLowColor) : caption == "LDN" ? (direction == 1 ? londonHighColor : londonLowColor) : (direction == 1 ? nyHighColor : nyLowColor)
+f_sessionWidth(string caption, int direction) =>
+    caption == "AS" ? (direction == 1 ? asiaHighWidth : asiaLowWidth) : caption == "LDN" ? (direction == 1 ? londonHighWidth : londonLowWidth) : (direction == 1 ? nyHighWidth : nyLowWidth)
+
+type Gap
+    float top
+    float bottom
+    int direction
+    int born
+    int inversion = na
+    box drawing = na
+    int originTime = na
+
+type Level
+    float price
+    int direction
+    int bornTime
+    bool touched = false
+    line drawing = na
+    label tag = na
+    label sweepTag = na
+    string source = ""
+    int touchTime = na
+
+type Setup
+    int started = na
+    int legStart = na
+    bool active = false
+    bool delivered = false
+    float zoneTop = na
+    float zoneBottom = na
+    string zoneTf = "-"
+    float zoneMinutes = na
+    int zoneBorn = na
+    float sweepPrice = na
+    string sweepSource = "-"
+
+type ContinuationZone
+    float top
+    float bottom
+    int direction
+    int confirmedTime
+    int born
+    string source
+    bool used = false
+
+type SessionState
+    float hi = na
+    float lo = na
+    bool wasIn = false
+    int hiTime = na
+    int loTime = na
+    line openDrawing = na
+
+type LRLStructure
+    int direction
+    float breachPrice
+    line drawing
+    array<int> contactTimes
+    array<float> contactPrices
+
+var array<Gap> gaps = array.new<Gap>()
+var array<Gap> higher1 = array.new<Gap>()
+var array<Gap> higher2 = array.new<Gap>()
+var array<Gap> higher3 = array.new<Gap>()
+var array<ContinuationZone> continuationZones = array.new<ContinuationZone>()
+var array<Level> keySignalLevels = array.new<Level>()
+var array<box> mitigated4hDrawings = array.new<box>()
+var array<line> crLines = array.new<line>()
+var array<label> crTags = array.new<label>()
+var array<line> sessionOpenLines = array.new<line>()
+var array<label> sessionOpenTags = array.new<label>()
+var array<box> nwogBoxes = array.new<box>()
+var array<Level> swingLevels = array.new<Level>()
+var array<Level> signalLevels = array.new<Level>()
+var array<Level> equalLevels = array.new<Level>()
+var array<Level> priorSessions = array.new<Level>()
+var array<label> signalLabels = array.new<label>()
+var array<label> lrlTags = array.new<label>()
+var array<LRLStructure> lrlStructures = array.new<LRLStructure>()
+var array<label> eventTags = array.new<label>()
+var array<line> extraLines = array.new<line>()
+var array<label> smtLineTags = array.new<label>()
+var array<Level> archivedSwings = array.new<Level>()
+var array<Gap> linkedGapBoxes = array.new<Gap>()
+var array<float> hiPoints = array.new<float>()
+var array<float> loPoints = array.new<float>()
+var array<int> hiBars = array.new<int>()
+var array<int> loBars = array.new<int>()
+var array<int> hiTimes = array.new<int>()
+var array<int> loTimes = array.new<int>()
+var array<bool> hiSwept = array.new<bool>()
+var array<bool> loSwept = array.new<bool>()
+var Setup longSetup = Setup.new()
+var Setup shortSetup = Setup.new()
+var Setup longContinuation = Setup.new()
+var Setup shortContinuation = Setup.new()
+var SessionState asia = SessionState.new()
+var SessionState london = SessionState.new()
+var SessionState newYork = SessionState.new()
+var SessionState premarket = SessionState.new()
+
+f_archiveSwing(Level lv) =>
+    if swingHistoryLimit > 0 and not na(lv.drawing)
+        // Copy visual ownership without aliasing analytical touched state.
+        archivedSwings.push(Level.new(lv.price, lv.direction, lv.bornTime, lv.touched, lv.drawing, lv.tag, lv.sweepTag, lv.source, lv.touchTime))
+        if archivedSwings.size() > swingHistoryLimit
+            Level retired = archivedSwings.shift()
+            line.delete(retired.drawing)
+            label.delete(retired.tag)
+            label.delete(retired.sweepTag)
+    else
+        line.delete(lv.drawing)
+        label.delete(lv.tag)
+        label.delete(lv.sweepTag)
+    lv.drawing := na
+    lv.tag := na
+    lv.sweepTag := na
+    // Keep this helper void in every branch; Pine otherwise infers a label return.
+    label.delete(lv.sweepTag)
+
+f_addLevel(array<Level> levels, float price, int direction, int bornTime, bool visible, string caption, int maxCount) =>
+    line drawing = na
+    label tag = na
+    if visible
+        bool equalLevel = caption == "EQ"
+        bool sessionLevel = caption == "AS" or caption == "LDN" or caption == "NY"
+        color levelColor = equalLevel ? equalLevelColor : sessionLevel ? f_sessionColor(caption, direction) : direction == 1 ? liquidityHighColor : liquidityLowColor
+        string levelStyle = sessionLevel ? f_sessionLineStyle(caption) : equalLevel ? f_lineStyle(equalLineStyle) : f_lineStyle(liquidityLineStyle)
+        drawing := line.new(bornTime, price, time, price, xloc=xloc.bar_time, extend=extend.right, color=color.new(levelColor, equalLevel ? 45 : 20), style=levelStyle, width=sessionLevel ? f_sessionWidth(caption, direction) : equalLevel ? equalWidth : liquidityWidth)
+        bool allowTag = showLevelTags and (equalLevel ? showEqualTags : sessionLevel ? showSessionTags : liquidityTagMode != "Off")
+        if allowTag
+            string tagText = equalLevel ? direction == 1 ? "EQH" : "EQL" : sessionLevel ? caption + (direction == 1 ? " H" : " L") : liquidityTagMode == "$$$" ? "$$$" : caption
+            string explanation = equalLevel ? "Relatively equal high/low" : sessionLevel ? "Completed-session extreme" : "Resting liquidity at a confirmed swing; the line starts at this pivot and stops when a wick sweeps it"
+            tag := label.new(bornTime, f_tagY(price, direction, 1.0), tagText, xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(sessionLevel ? f_sessionMarker(caption) : equalLevel ? equalMarker : liquidityMarker, direction), color=f_labelBackground(sessionLevel ? f_sessionMarker(caption) : equalLevel ? equalMarker : liquidityMarker, resolvedTagBackground), textcolor=levelColor, size=sessionLevel ? f_sessionTagSize(caption) : f_tagSize(equalLevel ? equalTagSize : liquidityTagSize), tooltip=explanation + (sessionLevel ? "; known when the session ends" : "; known after pivot confirmation"))
+    levels.push(Level.new(price, direction, bornTime, false, drawing, tag, na, caption, na))
+    bool capSwing = caption == "BSL" or caption == "SSL"
+    bool capSession = caption == "AS" or caption == "LDN" or caption == "NY"
+    if capSwing or capSession
+        // Retain the newest drawings in one backwards pass; analytical levels stay intact.
+        int retainedDrawings = 0
+        int drawingIndex = levels.size() - 1
+        int drawingBudget = capSwing ? visualSwingLimit : visibleSessionLimit
+        while drawingIndex >= 0
+            Level lv = levels.get(drawingIndex)
+            if not na(lv.drawing)
+                retainedDrawings += 1
+                if retainedDrawings > drawingBudget
+                    if capSwing
+                        f_archiveSwing(lv)
+                    else
+                        line.delete(lv.drawing)
+                        label.delete(lv.tag)
+                        label.delete(lv.sweepTag)
+                        lv.drawing := na
+                        lv.tag := na
+                        lv.sweepTag := na
+                        label.delete(lv.sweepTag)
+            drawingIndex -= 1
+    if levels.size() > maxCount
+        Level old = levels.shift()
+        if capSwing
+            f_archiveSwing(old)
+        else
+            line.delete(old.drawing)
+            label.delete(old.tag)
+            label.delete(old.sweepTag)
+
+f_updateArchivedSwings() =>
+    for lv in archivedSwings
+        if not lv.touched and (lv.direction == 1 ? high > lv.price : low < lv.price)
+            lv.touched := true
+            line.set_x2(lv.drawing, time)
+            line.set_extend(lv.drawing, extend.none)
+            line.set_style(lv.drawing, line.style_dashed)
+            line.set_color(lv.drawing, color.new(sweptColor, 35))
+            if not na(lv.tag)
+                label.set_textcolor(lv.tag, sweptColor)
+                label.set_tooltip(lv.tag, "Historical swing already swept. Visual context only; retired from the analytical queue.")
+
+f_extraLine(int t1, float p1, int t2, float p2, color c, string style, int side) =>
+    line l = line.new(t1, p1, t2, p2, xloc=xloc.bar_time, color=c, style=style, width=smtWidth)
+    extraLines.push(l)
+    label tag = na
+    if smtLineLabels
+        tag := label.new(t2, f_tagY(p2, side, 2.0), "SMT · " + peer, xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(smtMarker, side), color=f_labelBackground(smtMarker, resolvedTagBackground), textcolor=c, size=f_tagSize(smtTagSize), tooltip="Confirmed divergence vs " + peer + ". Line endpoints are independently confirmed pivots; detection is delayed by pivot confirmation.")
+    smtLineTags.push(tag)
+    if extraLines.size() > 30
+        line.delete(extraLines.shift())
+        label.delete(smtLineTags.shift())
+
+f_referenceTag(float price, string caption, color tagColor) =>
+    label.new(bar_index + openTagOffset, price, caption, yloc=yloc.price, style=f_labelStyle(f_referenceMarker(caption), 1), color=f_labelBackground(f_referenceMarker(caption), resolvedTagBackground), textcolor=tagColor, size=f_referenceSize(caption), tooltip=caption + " · Reference level")
+
+f_session(SessionState state, bool inside, string caption, bool visible, bool openVisible, array<Level> destination) =>
+    if inside and not state.wasIn
+        if not na(state.openDrawing)
+            line.set_extend(state.openDrawing, extend.none)
+            line.set_x2(state.openDrawing, time)
+        state.openDrawing := na
+        if openVisible
+            color openColor = caption == "AS" ? asiaKeyColor : caption == "LDN" ? londonKeyColor : nyKeyColor
+            string openStyle = f_sessionLineStyle(caption)
+            state.openDrawing := line.new(time, open, time_close, open, xloc=xloc.bar_time, extend=extend.right, color=openColor, style=openStyle, width=sessionOpenWidth)
+            label openTag = na
+            if showLevelTags and showOpenTags
+                openTag := label.new(time, f_tagY(open, 1, 1.1), caption + " O", xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(f_sessionMarker(caption), 1), color=f_labelBackground(f_sessionMarker(caption), resolvedTagBackground), textcolor=openColor, size=f_sessionTagSize(caption), tooltip="Open of " + caption + "; known from the first session bar")
+            sessionOpenLines.push(state.openDrawing)
+            sessionOpenTags.push(openTag)
+            if sessionOpenLines.size() > 30
+                line.delete(sessionOpenLines.shift())
+                label.delete(sessionOpenTags.shift())
+    if inside
+        if not state.wasIn or na(state.hi) or high > state.hi
+            state.hi := high
+            state.hiTime := time
+        if not state.wasIn or na(state.lo) or low < state.lo
+            state.lo := low
+            state.loTime := time
+    if not inside and state.wasIn
+        f_addLevel(destination, state.hi, 1, state.hiTime, visible, caption, 18)
+        f_addLevel(destination, state.lo, -1, state.loTime, visible, caption, 18)
+    state.wasIn := inside
+
+f_sweeps(array<Level> levels, bool hideTouched, bool markVisibleSwing) =>
+    bool sellside = false
+    bool buyside = false
+    bool sellsideMarked = false
+    bool buysideMarked = false
+    for lv in levels
+        if not lv.touched
+            bool crossed = lv.direction == 1 ? high > lv.price : low < lv.price
+            if crossed
+                sellside := sellside or (lv.direction == -1 and close > lv.price)
+                buyside := buyside or (lv.direction == 1 and close < lv.price)
+                bool visibleReclaim = markVisibleSwing and not na(lv.drawing) and time >= chart.left_visible_bar_time and time <= chart.right_visible_bar_time
+                if visibleReclaim and showSweepTags and lv.direction == -1 and close > lv.price and not sellsideMarked
+                    lv.sweepTag := label.new(time, f_tagY(lv.price, -1, 1.8), sweepTagText, xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(sweepMarker, -1), color=f_labelBackground(sweepMarker, resolvedTagBackground), textcolor=sweptColor, size=f_tagSize(sweepTagSize), tooltip="SSL sweep and reclaim. The line connects this event to its source swing.")
+                    sellsideMarked := true
+                if visibleReclaim and showSweepTags and lv.direction == 1 and close < lv.price and not buysideMarked
+                    lv.sweepTag := label.new(time, f_tagY(lv.price, 1, 1.8), sweepTagText, xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(sweepMarker, 1), color=f_labelBackground(sweepMarker, resolvedTagBackground), textcolor=sweptColor, size=f_tagSize(sweepTagSize), tooltip="BSL sweep and reclaim. The line connects this event to its source swing.")
+                    buysideMarked := true
+                lv.touched := true
+                lv.touchTime := time
+                if not na(lv.drawing)
+                    line.set_x2(lv.drawing, time)
+                    line.set_extend(lv.drawing, extend.none)
+                    line.set_style(lv.drawing, line.style_dashed)
+                    line.set_color(lv.drawing, color.new(sweptColor, 35))
+                    if hideTouched
+                        line.delete(lv.drawing)
+                        lv.drawing := na
+                        label.delete(lv.sweepTag)
+                        lv.sweepTag := na
+                if not na(lv.tag)
+                    if hideTouched
+                        label.delete(lv.tag)
+                        lv.tag := na
+                    else
+                        label.set_textcolor(lv.tag, sweptColor)
+                        label.set_tooltip(lv.tag, "Level " + lv.source + " already swept; the dashed line ends at the sweep candle.")
+    [sellside, buyside]
+
+f_addGap(array<Gap> collection, float top, float bottom, int direction, int born, int leftTime, bool visible, string caption, int maxCount, color zoneColor, string zoneTextSize, bool chartZone = false) =>
+    box drawing = na
+    if visible
+        string renderedSize = zoneTextSize == "Normal" ? size.normal : zoneTextSize == "Small" ? size.small : size.tiny
+        drawing := box.new(leftTime, top, time_close, bottom, xloc=xloc.bar_time, border_color=color.new(zoneColor, 55), bgcolor=color.new(zoneColor, chartZone ? chartGapOpacity : 85), border_width=chartZone ? chartGapBorderWidth : 1, text=caption, text_color=zoneColor, text_size=renderedSize, text_halign=text.align_right)
+    collection.push(Gap.new(top, bottom, direction, born, na, drawing, leftTime))
+    // A display budget must not silently remove an active analytical zone.
+    int retainedDrawings = 0
+    int drawingIndex = collection.size() - 1
+    while drawingIndex >= 0
+        Gap g = collection.get(drawingIndex)
+        if not na(g.drawing)
+            retainedDrawings += 1
+            if retainedDrawings > maxCount
+                box.delete(g.drawing)
+                g.drawing := na
+        drawingIndex -= 1
+    // Fail explicitly rather than silently discard active HTF state.
+    if collection.size() > 1000
+        runtime.error("More than 1000 retained gaps. Narrow the loaded history or choose a higher timeframe; state was not silently truncated.")
+
+f_higher(array<Gap> collection, bool extendRight, bool retainMitigated, array<box> mitigatedDrawings, int mitigatedLimit, bool nativeChartTf) =>
+    bool bullTouch = false
+    bool bearTouch = false
+    bool tagged = false
+    bool midpoint = false
+    int i = collection.size() - 1
+    while i >= 0
+        Gap g = collection.get(i)
+        // During historical replay, intermediate positions are never displayed.
+        // Keep the final confirmed-bar geometry; mitigated boxes are frozen below.
+        if not na(g.drawing) and (barstate.islast or barstate.islastconfirmedhistory)
+            box.set_right(g.drawing, time_close)
+            box.set_extend(g.drawing, extendRight ? extend.right : extend.none)
+        // A same-timeframe FVG becomes known only at this bar's close.
+        bool contact = (not nativeChartTf or g.born < bar_index) and low <= g.top and high >= g.bottom
+        float mid = math.avg(g.top, g.bottom)
+        bullTouch := bullTouch or (contact and g.direction == 1)
+        bearTouch := bearTouch or (contact and g.direction == -1)
+        tagged := tagged or contact
+        midpoint := midpoint or (low <= mid and high >= mid)
+        float lowerSource = mitigationType == "Close" ? close : low
+        float upperSource = mitigationType == "Close" ? close : high
+        float threshold = mitigation == "50%" ? mid : g.direction == 1 ? g.bottom : g.top
+        bool invalid = nativeChartTf and g.born == bar_index ? false : (mitigation == "On Touch" ? contact : (g.direction == 1 ? lowerSource <= threshold : upperSource >= threshold))
+        if invalid
+            if retainMitigated and not na(g.drawing)
+                box.set_extend(g.drawing, extend.none)
+                box.set_right(g.drawing, time_close)
+                box.set_bgcolor(g.drawing, color.new(color.gray, 93))
+                box.set_border_color(g.drawing, color.new(color.gray, 75))
+                box.set_text(g.drawing, "4h mitigated")
+                mitigatedDrawings.push(g.drawing)
+                if mitigatedDrawings.size() > mitigatedLimit
+                    box.delete(mitigatedDrawings.shift())
+            else
+                box.delete(g.drawing)
+            collection.remove(i)
+        i -= 1
+    [bullTouch, bearTouch, tagged, midpoint]
+
+f_ready(Setup s, int direction) =>
+    int count = 0
+    int completed = 0
+    bool inProcess = false
+    bool newlyInverted = false
+    if s.active
+        for g in gaps
+            if g.direction == -direction and g.born >= s.legStart and bar_index - g.born <= signalGapAge and (na(g.inversion) or g.inversion >= s.started)
+                count += 1
+                completed += not na(g.inversion) ? 1 : 0
+                newlyInverted := newlyInverted or g.inversion == bar_index
+                inProcess := inProcess or (na(g.inversion) and close > g.bottom and close < g.top)
+    // Expiring an old gap must not create a signal without a fresh inversion.
+    bool ready = newlyInverted and count > 0 and (allInverse ? completed == count : completed > 0)
+    [ready, inProcess, count, completed]
+
+f_drawLinkedGaps(Setup selected, int direction) =>
+    if showIFVG and chartGapScope == "Signal-linked only"
+        for g in gaps
+            bool participates = g.direction == -direction and g.born >= selected.legStart and bar_index - g.born <= signalGapAge and not na(g.inversion) and g.inversion >= selected.started
+            if participates and na(g.drawing)
+                color zoneColor = direction == 1 ? chartBullInverseColor : chartBearInverseColor
+                int rightTime = gapDisplay == "Follow price" ? time_close : math.min(time_close, g.originTime + compactGapBars * barMillis)
+                int leftTime = gapDisplay == "Moving compact" ? math.max(g.originTime, time_close - compactGapBars * barMillis) : g.originTime
+                if gapDisplay == "Moving compact"
+                    rightTime := time_close
+                g.drawing := box.new(leftTime, g.top, rightTime, g.bottom, xloc=xloc.bar_time, border_color=color.new(zoneColor, 55), border_width=chartGapBorderWidth, bgcolor=color.new(zoneColor, chartGapOpacity), text=chartGapText ? "iFVG" : "", text_color=zoneColor, text_size=f_tagSize(chartGapTextSize), text_halign=text.align_right)
+                linkedGapBoxes.push(g)
+                if linkedGapBoxes.size() > gapLimit
+                    Gap oldOwner = linkedGapBoxes.shift()
+                    box.delete(oldOwner.drawing)
+                    oldOwner.drawing := na
+
+// Wick sweep and source are captured BEFORE the visual sweep routine consumes levels.
+f_wickSweep(array<Level> levels, int side) =>
+    bool found = false
+    float price = na
+    string source = "-"
+    int newest = na
+    for lv in levels
+        bool crossed = side == 1 ? high > lv.price : low < lv.price
+        if lv.direction == side and not lv.touched and crossed and (na(newest) or lv.bornTime > newest)
+            found := true
+            price := lv.price
+            source := lv.source + (side == 1 ? " H" : " L")
+            newest := lv.bornTime
+    [found, price, source]
+
+f_stageReversal(array<Level> levels, Setup bull, Setup bear, int bullLeg, int bearLeg) =>
+    [buySweep, buyPrice, buySource] = f_wickSweep(levels, -1)
+    [sellSweep, sellPrice, sellSource] = f_wickSweep(levels, 1)
+    if buySweep
+        bull.started := bar_index
+        bull.legStart := math.max(nz(bullLeg, bar_index - legLookback), bar_index - legLookback)
+        bull.active := true
+        bull.delivered := false
+        bull.zoneTf := "-"
+        bull.zoneTop := na
+        bull.zoneBottom := na
+        bull.zoneBorn := na
+        bull.zoneMinutes := na
+        bull.sweepPrice := buyPrice
+        bull.sweepSource := buySource
+    if sellSweep
+        bear.started := bar_index
+        bear.legStart := math.max(nz(bearLeg, bar_index - legLookback), bar_index - legLookback)
+        bear.active := true
+        bear.delivered := false
+        bear.zoneTf := "-"
+        bear.zoneTop := na
+        bear.zoneBottom := na
+        bear.zoneBorn := na
+        bear.zoneMinutes := na
+        bear.sweepPrice := sellPrice
+        bear.sweepSource := sellSource
+
+f_linkReversalZone(Setup s, array<Gap> zones, int direction, simple string source) =>
+    if s.active and s.started == bar_index
+        float extreme = direction == 1 ? low : high
+        for g in zones
+            bool closeValid = direction == 1 ? close >= g.bottom : close <= g.top
+            bool knownBeforeSweep = g.born < bar_index or timeframe.in_seconds(source) > timeframe.in_seconds()
+            if knownBeforeSweep and g.direction == direction and extreme >= g.bottom and extreme <= g.top and closeValid
+                s.delivered := true
+                s.zoneTop := g.top
+                s.zoneBottom := g.bottom
+                s.zoneTf := source
+                s.zoneMinutes := timeframe.in_seconds(source) / 60.0
+                s.zoneBorn := g.born
+
+f_target(array<Level> levels, int direction) =>
+    float price = na
+    string source = "-"
+    for lv in levels
+        bool eligible = not lv.touched and lv.direction == direction and (direction == 1 ? lv.price > close : lv.price < close)
+        if eligible and (na(price) or (direction == 1 ? lv.price < price : lv.price > price))
+            price := lv.price
+            source := lv.source + (direction == 1 ? " H" : " L")
+    [price, source]
+
+f_addContinuationZone(float top, float bottom, int direction, int confirmedTime, string source) =>
+    continuationZones.push(ContinuationZone.new(top, bottom, direction, confirmedTime, bar_index, source))
+    if continuationZones.size() > 200
+        continuationZones.shift()
+
+f_retestContinuation(Setup s, int direction, int trend, int legStart, bool hasTarget) =>
+    if not s.active and trend == direction and hasTarget
+        int chosen = na
+        int chosenFrame = 0
+        int chosenTime = na
+        if continuationZones.size() > 0
+            for zoneIndex = 0 to continuationZones.size() - 1
+                ContinuationZone z = continuationZones.get(zoneIndex)
+                int sourceMinutes = z.source == "15" ? 15 : 5
+                int sourceMillis = sourceMinutes * 60000
+                bool enabled = z.source == "15" ? continuation15m : continuation5m
+                bool fresh = time >= z.confirmedTime and time - z.confirmedTime <= continuationAge * sourceMillis
+                bool approached = direction == 1 ? close[1] > z.top : close[1] < z.bottom
+                bool overlap = low <= z.top and high >= z.bottom
+                bool closeValid = direction == 1 ? close >= z.bottom : close <= z.top
+                if enabled and z.direction == direction and not z.used and fresh and approached and overlap and closeValid and (sourceMinutes > chosenFrame or (sourceMinutes == chosenFrame and (na(chosenTime) or z.confirmedTime > chosenTime)))
+                    chosen := zoneIndex
+                    chosenFrame := sourceMinutes
+                    chosenTime := z.confirmedTime
+        if not na(chosen)
+            ContinuationZone z = continuationZones.get(chosen)
+            s.active := true
+            s.started := bar_index
+            s.legStart := math.max(math.max(nz(legStart, bar_index - legLookback), bar_index - legLookback), z.born)
+            s.delivered := true
+            s.zoneTop := z.top
+            s.zoneBottom := z.bottom
+            s.zoneTf := z.source
+            s.zoneMinutes := chosenFrame
+            s.zoneBorn := z.born
+            s.sweepSource := "FVG retracement · " + z.source
+            z.used := true
+
+f_applyLRLDisplay() =>
+    int retained = 0
+    int index = lrlStructures.size() - 1
+    while index >= 0
+        LRLStructure item = lrlStructures.get(index)
+        retained += 1
+        if showLRL and retained <= lrlVisualLimit
+            if na(item.drawing)
+                int last = item.contactTimes.size() - 1
+                item.drawing := line.new(item.contactTimes.get(0), item.contactPrices.get(0), item.contactTimes.get(last), item.contactPrices.get(last), xloc=xloc.bar_time, extend=extend.right, color=color.new(lrlColor, 25), style=f_lineStyle(lrlLineStyle), width=lrlWidth)
+        else
+            line.delete(item.drawing)
+            item.drawing := na
+        index -= 1
+
+f_refreshLRLTags() =>
+    f_applyLRLDisplay()
+    for tag in lrlTags
+        label.delete(tag)
+    lrlTags.clear()
+    if showLRL and showLRLTags
+        array<int> seenTimes = array.new<int>()
+        array<float> seenPrices = array.new<float>()
+        for structureItem in lrlStructures
+            if not na(structureItem.drawing)
+                for pointIndex = 0 to structureItem.contactTimes.size() - 1
+                    int pointTime = structureItem.contactTimes.get(pointIndex)
+                    float pointPrice = structureItem.contactPrices.get(pointIndex)
+                    bool alreadyTagged = false
+                    if seenTimes.size() > 0
+                        for seenIndex = 0 to seenTimes.size() - 1
+                            alreadyTagged := alreadyTagged or (seenTimes.get(seenIndex) == pointTime and math.abs(seenPrices.get(seenIndex) - pointPrice) <= syminfo.mintick)
+                    if not alreadyTagged
+                        seenTimes.push(pointTime)
+                        seenPrices.push(pointPrice)
+                        lrlTags.push(label.new(pointTime, f_tagY(pointPrice, structureItem.direction, 2.2), "LRL", xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(lrlMarker, structureItem.direction), color=f_labelBackground(lrlMarker, resolvedTagBackground), textcolor=lrlColor, size=f_tagSize(lrlTagSize), tooltip="LRL: confirmed pivot, unswept at formation. Remove the line if any touch-point liquidity is swept."))
+
+f_lrl(array<float> prices, array<int> bars, array<int> times, array<bool> swept, int direction) =>
+    bool formed = false
+    if prices.size() >= lrlPoints and not na(atr200)
+        int first = prices.size() - lrlPoints
+        int last = prices.size() - 1
+        int x0 = bars.get(first)
+        int x1 = bars.get(last)
+        float y0 = prices.get(first)
+        float y1 = prices.get(last)
+        float slope = x1 > x0 ? (y1 - y0) / (x1 - x0) : 0.0
+        float equalTolerance = equalATR * atr200
+        float minimumPrice = y0
+        float maximumPrice = y0
+        bool valid = x1 > x0 and x1 - x0 <= lrlMaxSpanBars and not na(atr)
+        for i = first to last
+            valid := valid and not swept.get(i)
+            minimumPrice := math.min(minimumPrice, prices.get(i))
+            maximumPrice := math.max(maximumPrice, prices.get(i))
+            if i > first
+                bool failureSwing = direction == 1 ? prices.get(i) <= prices.get(i - 1) + equalTolerance : prices.get(i) >= prices.get(i - 1) - equalTolerance
+                float expected = y0 + slope * (bars.get(i) - x0)
+                valid := valid and failureSwing and math.abs(prices.get(i) - expected) <= atr * resolvedLrlTolerance
+        valid := valid and maximumPrice - minimumPrice <= resolvedLrlCluster * atr200
+        int age = bar_index - x0
+        if not allowCross and valid
+            if age > 4000
+                valid := false
+            else
+                for offset = pivotRight to age
+                    float expected = y0 + slope * (bar_index - offset - x0)
+                    bool pierces = direction == 1 ? high[offset] > expected + syminfo.mintick : low[offset] < expected - syminfo.mintick
+                    valid := valid and not pierces
+                    if not valid
+                        break
+        if valid
+            // Replace overlapping structures rather than stack near-identical lines.
+            int existingIndex = lrlStructures.size() - 1
+            while existingIndex >= 0
+                LRLStructure prior = lrlStructures.get(existingIndex)
+                if prior.direction == direction and prior.contactTimes.get(prior.contactTimes.size() - 1) >= times.get(first)
+                    line.delete(prior.drawing)
+                    lrlStructures.remove(existingIndex)
+                existingIndex -= 1
+            array<int> selectedTimes = array.new<int>()
+            array<float> selectedPrices = array.new<float>()
+            for i = first to last
+                selectedTimes.push(times.get(i))
+                selectedPrices.push(prices.get(i))
+            line drawing = na
+            if showLRL
+                drawing := line.new(times.get(first), y0, times.get(last), y1, xloc=xloc.bar_time, extend=extend.right, color=color.new(lrlColor, 25), style=f_lineStyle(lrlLineStyle), width=lrlWidth)
+            // A high-side structure is swept at its lowest high; the low side at its highest low.
+            float breachPrice = direction == 1 ? minimumPrice : maximumPrice
+            lrlStructures.push(LRLStructure.new(direction, breachPrice, drawing, selectedTimes, selectedPrices))
+            if lrlStructures.size() > lrlStateLimit
+                LRLStructure oldest = lrlStructures.shift()
+                line.delete(oldest.drawing)
+            f_refreshLRLTags()
+            formed := true
+    formed
+
+// Closed HTF bars only: every requested expression is offset, with lookahead_on.
+// HTF gap creation is delayed until the first confirmed chart bar of the next HTF period.
+[h1, l1, h1old, l1old, t1, left1] = request.security(syminfo.tickerid, tf1, [high[1], low[1], high[3], low[3], time[1], time[3]], lookahead=barmerge.lookahead_on)
+[h2, l2, h2old, l2old, t2, left2] = request.security(syminfo.tickerid, tf2, [high[1], low[1], high[3], low[3], time[1], time[3]], lookahead=barmerge.lookahead_on)
+[h3, l3, h3old, l3old, t3, left3] = request.security(syminfo.tickerid, tf3, [high[1], low[1], high[3], low[3], time[1], time[3]], lookahead=barmerge.lookahead_on)
+[peerPH, peerPL, peerPivotTime] = request.security(peer, timeframe.period, [ta.pivothigh(high, pivotLeft, pivotRight), ta.pivotlow(low, pivotLeft, pivotRight), time[pivotRight]], gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[priorDH, priorDL] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+[priorWH, priorWL] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+[priorMH, priorML] = request.security(syminfo.tickerid, "M", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+[hourTime, hourHigh, hourLow, hourOpen] = request.security(syminfo.tickerid, "60", [time[1], high[1], low[1], open[1]], lookahead=barmerge.lookahead_on)
+[c5High, c5Low, c5OldHigh, c5OldLow, c5Confirmed] = request.security(syminfo.tickerid, "5", [high[1], low[1], high[3], low[3], time_close[1]], lookahead=barmerge.lookahead_on)
+[c15High, c15Low, c15OldHigh, c15OldLow, c15Confirmed] = request.security(syminfo.tickerid, "15", [high[1], low[1], high[3], low[3], time_close[1]], lookahead=barmerge.lookahead_on)
+
+// Only compare a layer on chart intervals at or below that layer. A 4h chart
+// cannot reconstruct complete 15m or 1h FVG histories from request.security().
+int chartSeconds = timeframe.in_seconds()
+bool tf1Usable = timeframe.in_seconds(tf1) >= chartSeconds
+bool tf2Usable = timeframe.in_seconds(tf2) >= chartSeconds
+bool tf3Usable = timeframe.in_seconds(tf3) >= chartSeconds
+bool hourRangeUsable = chartSeconds <= 3600
+bool reversalLtfUsable = chartSeconds >= 30 and chartSeconds <= 300
+bool continuationLtfUsable = chartSeconds >= 30 and chartSeconds <= 180
+
+float ph = ta.pivothigh(high, pivotLeft, pivotRight)
+float pl = ta.pivotlow(low, pivotLeft, pivotRight)
+float highSwingRange = ph - ta.lowest(low, pivotLeft + pivotRight + 1)
+float lowSwingRange = ta.highest(high, pivotLeft + pivotRight + 1) - pl
+float signalPH = ta.pivothigh(high, signalPivotLeft, signalPivotRight)
+float signalPL = ta.pivotlow(low, signalPivotLeft, signalPivotRight)
+var int lastSignalHighBar = na
+var int lastSignalLowBar = na
+bool inAsia = not na(time(timeframe.period, asiaSession, zone))
+bool inLondon = not na(time(timeframe.period, londonSession, zone))
+bool inNY = not na(time(timeframe.period, nySession, zone))
+bool inPremarket = not na(time(timeframe.period, "0800-0930", zone))
+bool inNYKillzone = not na(time(timeframe.period, useNyExtended ? nyExtendedKZ : nyKZ, zone))
+bool inLondonKillzone = includeLondonKZ and not na(time(timeframe.period, londonKZ, zone))
+bool inAsiaKillzone = includeAsiaKZ and not na(time(timeframe.period, asiaKZ, zone))
+bool inKillzone = inNYKillzone or inLondonKillzone or inAsiaKillzone
+int minuteNY = minute(time, zone)
+int hourNY = hour(time, zone)
+// Six windows: 09:50-10:10 through 14:50-15:10, end exclusive.
+bool macro = (hourNY >= 9 and hourNY <= 14 and minuteNY >= 50) or (hourNY >= 10 and hourNY <= 15 and minuteNY < 10)
+var float lastHigh = na
+var float lastLow = na
+var float previousChartHigh = na
+var float previousChartLow = na
+var int previousChartHighTime = na
+var int previousChartLowTime = na
+var float peerHighPrevious = na
+var float peerHighCurrent = na
+var float peerLowPrevious = na
+var float peerLowCurrent = na
+var int peerHighPreviousTime = na
+var int peerHighCurrentTime = na
+var int peerLowPreviousTime = na
+var int peerLowCurrentTime = na
+var int lastMarkedSmtHighTime = na
+var int lastMarkedSmtLowTime = na
+var int lastHighBar = na
+var int lastLowBar = na
+var int lastHighTime = na
+var int lastLowTime = na
+var int structure = 0
+var int lastBullHTF = na
+var int lastBearHTF = na
+// Provenance is diagnostic only. TF1/TF2 default to 15m/1h and are editable.
+var int lastBullTF1 = na
+var int lastBearTF1 = na
+var int lastBullTF2 = na
+var int lastBearTF2 = na
+var int lastBullTF3 = na
+var int lastBearTF3 = na
+var int lastBullSMT = na
+var int lastBearSMT = na
+var float cr8hi = na
+var float cr8lo = na
+var float cr9hi = na
+var float cr9lo = na
+var int crDay = na
+var array<bool> checklist = array.new<bool>(8, false)
+var int checklistDirection = 0
+var string checklistKind = "No confirmed signal"
+var string checklistHtfSource = "-"
+var string checklistDolSource = "-"
+var string checklistModelTarget = "-"
+var int checklistTime = na
+var int checklistCount = 0
+var array<bool> inspectedChecklist = array.new<bool>(8, false)
+var bool inspectedFound = false
+var int inspectedDirection = 0
+var string inspectedKind = "No signal on selected bar"
+var string inspectedHtfSource = "-"
+var string inspectedDolSource = "-"
+var string inspectedModelTarget = "-"
+var int inspectedTime = na
+var int inspectedCount = 0
+
+bool sweepLong = false
+bool sweepShort = false
+bool smtBull = false
+bool smtBear = false
+bool lrlBull = false
+bool lrlBear = false
+bool newBull1 = false
+bool newBear1 = false
+bool newBull2 = false
+bool newBear2 = false
+bool newBull3 = false
+bool newBear3 = false
+bool touch1 = false
+bool touch2 = false
+bool mid1 = false
+bool mid2 = false
+bool touch3 = false
+bool mid3 = false
+bool processLong = false
+bool processShort = false
+bool inverseBull = false
+bool inverseBear = false
+int longGapCount = 0
+int shortGapCount = 0
+int signalCode = 0
+bool signalDetailDrawn = false
+bool displacement = not na(atr) and math.abs(close - open) >= atr * displacementATR
+bool dolLong = false
+bool dolShort = false
+string dolLongSource = "-"
+string dolShortSource = "-"
+float dolLongPrice = na
+float dolShortPrice = na
+float modelTargetLong = na
+float modelTargetShort = na
+string modelTargetLongSource = "-"
+string modelTargetShortSource = "-"
+float signalZoneTop = na
+float signalZoneBottom = na
+float signalZoneTf = na
+float signalSweepPrice = na
+bool londonSweptAsiaHigh = false
+bool londonSweptAsiaLow = false
+bool nySweptAsiaHigh = false
+bool nySweptAsiaLow = false
+bool nySweptLondonHigh = false
+bool nySweptLondonLow = false
+int diagnosticLongStart = na
+int diagnosticShortStart = na
+bool range8HighTap = false
+bool range8LowTap = false
+bool range9HighTap = false
+bool range9LowTap = false
+var bool range8HighTouched = false
+var bool range8LowTouched = false
+var bool range9HighTouched = false
+var bool range9LowTouched = false
+var line current8HighLine = na
+var line current8LowLine = na
+var line current9HighLine = na
+var line current9LowLine = na
+var line current8OpenLine = na
+var line current9OpenLine = na
+int trendBeforeBar = structure
+int manualTrend = biasInput == "Bullish" ? 1 : biasInput == "Bearish" ? -1 : 0
+int continuationTrendBeforeBar = continuationTrendMode == "Manual bias" ? manualTrend : trendBeforeBar
+
+if barstate.isconfirmed
+    // Sweep state is updated before adding any newly confirmed pivot. A single
+    // wick beyond any contact invalidates the active LRL on this closed bar.
+    if hiSwept.size() > 0
+        for i = 0 to hiSwept.size() - 1
+            if high > hiPoints.get(i)
+                hiSwept.set(i, true)
+    if loSwept.size() > 0
+        for i = 0 to loSwept.size() - 1
+            if low < loPoints.get(i)
+                loSwept.set(i, true)
+    bool lrlRemoved = false
+    int structureIndex = lrlStructures.size() - 1
+    while structureIndex >= 0
+        LRLStructure active = lrlStructures.get(structureIndex)
+        bool breached = active.direction == 1 ? high > active.breachPrice : low < active.breachPrice
+        if breached
+            line.delete(active.drawing)
+            lrlStructures.remove(structureIndex)
+            lrlRemoved := true
+        structureIndex -= 1
+    if lrlRemoved
+        f_refreshLRLTags()
+    f_updateArchivedSwings()
+    f_session(asia, inAsia, "AS", sessionLines and showAsiaLevels, showAsiaOpen, priorSessions)
+    f_session(london, inLondon, "LDN", sessionLines and showLondonLevels, showLondonOpen, priorSessions)
+    f_session(newYork, inNY, "NY", sessionLines and showNYLevels, showNYOpen, priorSessions)
+    f_session(premarket, inPremarket, "PM", false, false, keySignalLevels)
+    if timeframe.change("D")
+        f_addLevel(keySignalLevels, priorDH, 1, time, false, "PD", 18)
+        f_addLevel(keySignalLevels, priorDL, -1, time, false, "PD", 18)
+    // Peer pivots are calculated in the peer's own series, not sampled at NQ pivots.
+    if not na(peerPH) and (na(peerHighCurrentTime) or peerPivotTime != peerHighCurrentTime)
+        peerHighPrevious := peerHighCurrent
+        peerHighPreviousTime := peerHighCurrentTime
+        peerHighCurrent := peerPH
+        peerHighCurrentTime := peerPivotTime
+    if not na(peerPL) and (na(peerLowCurrentTime) or peerPivotTime != peerLowCurrentTime)
+        peerLowPrevious := peerLowCurrent
+        peerLowPreviousTime := peerLowCurrentTime
+        peerLowCurrent := peerPL
+        peerLowCurrentTime := peerPivotTime
+    // Levels are known only after pivotRight bars. No signal is backdated.
+    if not na(ph)
+        if not na(lastHigh) and math.abs(ph - lastHigh) <= equalATR * atr200[pivotRight]
+            f_addLevel(equalLevels, math.max(ph, lastHigh), 1, lastHighTime, showEqual, "EQ", equalLimit)
+        previousChartHigh := lastHigh
+        previousChartHighTime := lastHighTime
+        lastHigh := ph
+        lastHighBar := bar_index - pivotRight
+        lastHighTime := time[pivotRight]
+        bool significantHigh = not na(atr200[pivotRight]) and highSwingRange >= visualSwingATR * atr200[pivotRight]
+        f_addLevel(swingLevels, ph, 1, time[pivotRight], showLiquidity and significantHigh, "BSL", levelLimit)
+        hiPoints.push(ph)
+        hiBars.push(lastHighBar)
+        hiTimes.push(lastHighTime)
+        hiSwept.push(false)
+        if hiPoints.size() > 6
+            hiPoints.shift()
+            hiBars.shift()
+            hiTimes.shift()
+            hiSwept.shift()
+        lrlBull := f_lrl(hiPoints, hiBars, hiTimes, hiSwept, 1)
+    if not na(pl)
+        if not na(lastLow) and math.abs(pl - lastLow) <= equalATR * atr200[pivotRight]
+            f_addLevel(equalLevels, math.min(pl, lastLow), -1, lastLowTime, showEqual, "EQ", equalLimit)
+        previousChartLow := lastLow
+        previousChartLowTime := lastLowTime
+        lastLow := pl
+        lastLowBar := bar_index - pivotRight
+        lastLowTime := time[pivotRight]
+        bool significantLow = not na(atr200[pivotRight]) and lowSwingRange >= visualSwingATR * atr200[pivotRight]
+        f_addLevel(swingLevels, pl, -1, time[pivotRight], showLiquidity and significantLow, "SSL", levelLimit)
+        loPoints.push(pl)
+        loBars.push(lastLowBar)
+        loTimes.push(lastLowTime)
+        loSwept.push(false)
+        if loPoints.size() > 6
+            loPoints.shift()
+            loBars.shift()
+            loTimes.shift()
+            loSwept.shift()
+        lrlBear := f_lrl(loPoints, loBars, loTimes, loSwept, -1)
+
+    int smtTolerance = smtSyncBars * barMillis
+    bool alignedHighs = not na(previousChartHighTime) and not na(lastHighTime) and not na(peerHighPreviousTime) and not na(peerHighCurrentTime) and math.abs(previousChartHighTime - peerHighPreviousTime) <= smtTolerance and math.abs(lastHighTime - peerHighCurrentTime) <= smtTolerance
+    bool alignedLows = not na(previousChartLowTime) and not na(lastLowTime) and not na(peerLowPreviousTime) and not na(peerLowCurrentTime) and math.abs(previousChartLowTime - peerLowPreviousTime) <= smtTolerance and math.abs(lastLowTime - peerLowCurrentTime) <= smtTolerance
+    smtBear := alignedHighs and not na(previousChartHigh) and not na(lastHigh) and not na(peerHighPrevious) and not na(peerHighCurrent) and lastHigh > previousChartHigh + atr * smtBreakATR and peerHighCurrent < peerHighPrevious and (na(lastMarkedSmtHighTime) or lastMarkedSmtHighTime != lastHighTime)
+    smtBull := alignedLows and not na(previousChartLow) and not na(lastLow) and not na(peerLowPrevious) and not na(peerLowCurrent) and lastLow < previousChartLow - atr * smtBreakATR and peerLowCurrent > peerLowPrevious and (na(lastMarkedSmtLowTime) or lastMarkedSmtLowTime != lastLowTime)
+    if smtBear
+        lastMarkedSmtHighTime := lastHighTime
+        lastBearSMT := bar_index
+        if showSMT
+            f_extraLine(previousChartHighTime, previousChartHigh, lastHighTime, lastHigh, smtBearColor, f_lineStyle(smtLineStyle), 1)
+    if smtBull
+        lastMarkedSmtLowTime := lastLowTime
+        lastBullSMT := bar_index
+        if showSMT
+            f_extraLine(previousChartLowTime, previousChartLow, lastLowTime, lastLow, smtBullColor, f_lineStyle(smtLineStyle), -1)
+
+    // Explicit key levels outrank a generic swing if both are swept on this bar.
+    if not na(signalPH)
+        lastSignalHighBar := bar_index - signalPivotRight
+        f_addLevel(signalLevels, signalPH, 1, time[signalPivotRight], false, "Internal", 60)
+    if not na(signalPL)
+        lastSignalLowBar := bar_index - signalPivotRight
+        f_addLevel(signalLevels, signalPL, -1, time[signalPivotRight], false, "Internal", 60)
+    if reversalLtfUsable
+        if shortPivotR
+            f_stageReversal(signalLevels, longSetup, shortSetup, lastSignalHighBar, lastSignalLowBar)
+        f_stageReversal(swingLevels, longSetup, shortSetup, lastSignalHighBar, lastSignalLowBar)
+        f_stageReversal(equalLevels, longSetup, shortSetup, lastSignalHighBar, lastSignalLowBar)
+        f_stageReversal(priorSessions, longSetup, shortSetup, lastSignalHighBar, lastSignalLowBar)
+        f_stageReversal(keySignalLevels, longSetup, shortSetup, lastSignalHighBar, lastSignalLowBar)
+    [sl1, ss1] = f_sweeps(swingLevels, false, true)
+    [sl2, ss2] = f_sweeps(equalLevels, true, false)
+    [sl3, ss3] = f_sweeps(priorSessions, false, false)
+    [sl4, ss4] = f_sweeps(keySignalLevels, false, false)
+    sweepLong := sl1 or sl2 or sl3 or sl4
+    sweepShort := ss1 or ss2 or ss3 or ss4
+    for lv in priorSessions
+        bool recentSession = time >= lv.bornTime and time - lv.bornTime <= sessionDolHours * 3600000
+        if recentSession and not lv.touched and lv.direction == 1 and lv.price > close and (na(dolLongPrice) or lv.price < dolLongPrice)
+            dolLongPrice := lv.price
+            dolLongSource := lv.source + " H"
+        if recentSession and not lv.touched and lv.direction == -1 and lv.price < close and (na(dolShortPrice) or lv.price > dolShortPrice)
+            dolShortPrice := lv.price
+            dolShortSource := lv.source + " L"
+        if recentSession and lv.touchTime == time
+            bool londonAsia = inLondon and lv.source == "AS"
+            bool nyAsia = inNY and lv.source == "AS"
+            bool nyLondon = inNY and lv.source == "LDN"
+            londonSweptAsiaHigh := londonSweptAsiaHigh or (londonAsia and lv.direction == 1)
+            londonSweptAsiaLow := londonSweptAsiaLow or (londonAsia and lv.direction == -1)
+            nySweptAsiaHigh := nySweptAsiaHigh or (nyAsia and lv.direction == 1)
+            nySweptAsiaLow := nySweptAsiaLow or (nyAsia and lv.direction == -1)
+            nySweptLondonHigh := nySweptLondonHigh or (nyLondon and lv.direction == 1)
+            nySweptLondonLow := nySweptLondonLow or (nyLondon and lv.direction == -1)
+            if showSessionSweepEvents and not na(lv.drawing) and (londonAsia or nyAsia or nyLondon) and time >= chart.left_visible_bar_time and time <= chart.right_visible_bar_time
+                string actor = inLondon ? "LDN" : "NY"
+                string side = lv.direction == 1 ? "H" : "L"
+                lv.sweepTag := label.new(time, f_tagY(lv.price, lv.direction, 1.8), actor + ">" + lv.source + " " + side, xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(sweepMarker, lv.direction), color=f_labelBackground(sweepMarker, resolvedTagBackground), textcolor=sweptColor, size=f_tagSize(sweepTagSize), tooltip=actor + " swept " + lv.source + " " + side + " with a wick; this target is no longer available as DOL")
+    dolLong := not na(dolLongPrice)
+    dolShort := not na(dolShortPrice)
+    [targetBuy1, targetBuySource1] = f_target(swingLevels, 1)
+    [targetBuy2, targetBuySource2] = f_target(equalLevels, 1)
+    [targetBuy3, targetBuySource3] = f_target(priorSessions, 1)
+    [targetBuy4, targetBuySource4] = f_target(keySignalLevels, 1)
+    [targetSell1, targetSellSource1] = f_target(swingLevels, -1)
+    [targetSell2, targetSellSource2] = f_target(equalLevels, -1)
+    [targetSell3, targetSellSource3] = f_target(priorSessions, -1)
+    [targetSell4, targetSellSource4] = f_target(keySignalLevels, -1)
+    array<float> buyTargets = array.from(targetBuy1, targetBuy2, targetBuy3, targetBuy4)
+    array<string> buySources = array.from(targetBuySource1, targetBuySource2, targetBuySource3, targetBuySource4)
+    array<float> sellTargets = array.from(targetSell1, targetSell2, targetSell3, targetSell4)
+    array<string> sellSources = array.from(targetSellSource1, targetSellSource2, targetSellSource3, targetSellSource4)
+    for targetIndex = 0 to 3
+        float buyTarget = buyTargets.get(targetIndex)
+        float sellTarget = sellTargets.get(targetIndex)
+        if not na(buyTarget) and (na(modelTargetLong) or buyTarget < modelTargetLong)
+            modelTargetLong := buyTarget
+            modelTargetLongSource := buySources.get(targetIndex)
+        if not na(sellTarget) and (na(modelTargetShort) or sellTarget > modelTargetShort)
+            modelTargetShort := sellTarget
+            modelTargetShortSource := sellSources.get(targetIndex)
+    for lrlItem in lrlStructures
+        if lrlItem.direction == 1 and lrlItem.breachPrice > close and (na(modelTargetLong) or lrlItem.breachPrice < modelTargetLong)
+            modelTargetLong := lrlItem.breachPrice
+            modelTargetLongSource := "LRL H"
+        if lrlItem.direction == -1 and lrlItem.breachPrice < close and (na(modelTargetShort) or lrlItem.breachPrice > modelTargetShort)
+            modelTargetShort := lrlItem.breachPrice
+            modelTargetShortSource := "LRL L"
+    if not na(lastHigh) and close > lastHigh
+        structure := 1
+    if not na(lastLow) and close < lastLow
+        structure := -1
+
+    if tf1Usable and (timeframe.in_seconds(tf1) == chartSeconds or t1 != t1[1])
+        bool native1 = timeframe.in_seconds(tf1) == chartSeconds
+        newBull1 := native1 ? low > high[2] : l1 > h1old
+        newBear1 := native1 ? high < low[2] : h1 < l1old
+        if newBull1 or newBear1
+            f_addGap(higher1, newBull1 ? (native1 ? low : l1) : (native1 ? low[2] : l1old), newBull1 ? (native1 ? high[2] : h1old) : (native1 ? high : h1), newBull1 ? 1 : -1, bar_index, native1 ? time[2] : left1, htfOn and htf1Visible, htf1Text ? tf1 + " FVG" : "", htfLimit, htf1Color, htf1TextSize)
+    if tf2Usable and (timeframe.in_seconds(tf2) == chartSeconds or t2 != t2[1])
+        bool native2 = timeframe.in_seconds(tf2) == chartSeconds
+        newBull2 := native2 ? low > high[2] : l2 > h2old
+        newBear2 := native2 ? high < low[2] : h2 < l2old
+        if newBull2 or newBear2
+            f_addGap(higher2, newBull2 ? (native2 ? low : l2) : (native2 ? low[2] : l2old), newBull2 ? (native2 ? high[2] : h2old) : (native2 ? high : h2), newBull2 ? 1 : -1, bar_index, native2 ? time[2] : left2, htfOn and htf2Visible, htf2Text ? tf2 + " FVG" : "", htfLimit, htf2Color, htf2TextSize)
+    if tf3Usable and (timeframe.in_seconds(tf3) == chartSeconds or t3 != t3[1])
+        bool native3 = timeframe.in_seconds(tf3) == chartSeconds
+        newBull3 := native3 ? low > high[2] : l3 > h3old
+        newBear3 := native3 ? high < low[2] : h3 < l3old
+        if newBull3 or newBear3
+            f_addGap(higher3, newBull3 ? (native3 ? low : l3) : (native3 ? low[2] : l3old), newBull3 ? (native3 ? high[2] : h3old) : (native3 ? high : h3), newBull3 ? 1 : -1, bar_index, native3 ? time[2] : left3, htfOn and htf3Visible, htf3Text ? tf3 + " FVG" : "", htfLimit, htf3Color, htf3TextSize)
+    // Capture origin before mitigation can remove the touched box.
+    f_linkReversalZone(longSetup, higher1, 1, tf1)
+    f_linkReversalZone(shortSetup, higher1, -1, tf1)
+    f_linkReversalZone(longSetup, higher2, 1, tf2)
+    f_linkReversalZone(shortSetup, higher2, -1, tf2)
+    if reversal4h
+        f_linkReversalZone(longSetup, higher3, 1, tf3)
+        f_linkReversalZone(shortSetup, higher3, -1, tf3)
+    [bt1, st1, tg1, md1] = f_higher(higher1, htf1Extend, false, mitigated4hDrawings, htf3MitigatedLimit, timeframe.in_seconds(tf1) == chartSeconds)
+    [bt2, st2, tg2, md2] = f_higher(higher2, htf2Extend, false, mitigated4hDrawings, htf3MitigatedLimit, timeframe.in_seconds(tf2) == chartSeconds)
+    [bt3, st3, tg3, md3] = f_higher(higher3, htf3Extend, htfOn and htf3Visible and htf3ShowMitigated, mitigated4hDrawings, htf3MitigatedLimit, timeframe.in_seconds(tf3) == chartSeconds)
+    touch1 := tg1
+    touch2 := tg2
+    mid1 := md1
+    mid2 := md2
+    touch3 := tg3
+    mid3 := md3
+    if bt1
+        lastBullTF1 := bar_index
+    if st1
+        lastBearTF1 := bar_index
+    if bt2
+        lastBullTF2 := bar_index
+    if st2
+        lastBearTF2 := bar_index
+    if bt3
+        lastBullTF3 := bar_index
+    if st3
+        lastBearTF3 := bar_index
+    if bt1 or bt2 or (htf3Confluence and bt3)
+        lastBullHTF := bar_index
+    if st1 or st2 or (htf3Confluence and st3)
+        lastBearHTF := bar_index
+
+    // Chart-gap state has a deterministic time horizon independent of drawing count.
+    // Keep 300 bars for historical drawings and legacy experiments; readiness still
+    // uses signalGapAge. Neither horizon depends on the number of visible boxes.
+    int retainBars = math.max(300, signalGapAge)
+    int gapIndex = gaps.size() - 1
+    while gapIndex >= 0
+        Gap oldGap = gaps.get(gapIndex)
+        if bar_index - oldGap.born > retainBars
+            // Linked drawings have a separate history pool after analytical expiry.
+            if chartGapScope == "All gaps"
+                box.delete(oldGap.drawing)
+            gaps.remove(gapIndex)
+        gapIndex -= 1
+    if low > high[2] and low - high[2] >= gapMinimum
+        f_addGap(gaps, low, high[2], 1, bar_index, time[2], showIFVG and chartGapScope == "All gaps", chartGapText ? "FVG+" : "", gapLimit, chartBullGapColor, chartGapTextSize, true)
+    if high < low[2] and low[2] - high >= gapMinimum
+        f_addGap(gaps, low[2], high, -1, bar_index, time[2], showIFVG and chartGapScope == "All gaps", chartGapText ? "FVG-" : "", gapLimit, chartBearGapColor, chartGapTextSize, true)
+    for g in gaps
+        if na(g.inversion)
+            if not na(g.drawing)
+                if gapDisplay != "Fixed compact"
+                    box.set_right(g.drawing, time_close)
+                if gapDisplay == "Moving compact"
+                    box.set_left(g.drawing, math.max(box.get_left(g.drawing), time_close - compactGapBars * barMillis))
+                if gapDisplay == "Fixed compact"
+                    box.set_right(g.drawing, math.min(time_close, box.get_left(g.drawing) + compactGapBars * barMillis))
+            bool inversed = g.direction == 1 ? close < g.bottom : close > g.top
+            if inversed
+                g.inversion := bar_index
+                inverseBull := inverseBull or g.direction == -1
+                inverseBear := inverseBear or g.direction == 1
+                if not na(g.drawing)
+                    color inverseColor = g.direction == -1 ? chartBullInverseColor : chartBearInverseColor
+                    box.set_bgcolor(g.drawing, color.new(inverseColor, chartGapOpacity))
+                    box.set_border_color(g.drawing, color.new(inverseColor, 55))
+                    box.set_text_color(g.drawing, inverseColor)
+                    box.set_text(g.drawing, chartGapText ? "iFVG" : "")
+
+    // Short pivots are consumed even if their optional eligibility for R is disabled.
+    [coreLong, coreShort] = f_sweeps(signalLevels, false, false)
+    if continuationLtfUsable
+        if c5Confirmed != c5Confirmed[1]
+            if c5Low > c5OldHigh
+                f_addContinuationZone(c5Low, c5OldHigh, 1, c5Confirmed, "5")
+            if c5High < c5OldLow
+                f_addContinuationZone(c5OldLow, c5High, -1, c5Confirmed, "5")
+        if c15Confirmed != c15Confirmed[1]
+            if c15Low > c15OldHigh
+                f_addContinuationZone(c15Low, c15OldHigh, 1, c15Confirmed, "15")
+            if c15High < c15OldLow
+                f_addContinuationZone(c15OldLow, c15High, -1, c15Confirmed, "15")
+        int continuationIndex = continuationZones.size() - 1
+        while continuationIndex >= 0
+            ContinuationZone z = continuationZones.get(continuationIndex)
+            int sourceMillis = z.source == "15" ? 900000 : 300000
+            bool invalid = z.direction == 1 ? close < z.bottom : close > z.top
+            if invalid or time - z.confirmedTime > continuationAge * sourceMillis
+                continuationZones.remove(continuationIndex)
+            continuationIndex -= 1
+    if longSetup.delivered and close < longSetup.zoneBottom
+        longSetup.delivered := false
+    if shortSetup.delivered and close > shortSetup.zoneTop
+        shortSetup.delivered := false
+    if longSetup.active and bar_index - longSetup.started > setupTTL
+        longSetup.active := false
+    if shortSetup.active and bar_index - shortSetup.started > setupTTL
+        shortSetup.active := false
+    int continuationTrendNow = continuationTrendMode == "Manual bias" ? manualTrend : structure
+    if longContinuation.active and (bar_index - longContinuation.started > continuationTTL or close < longContinuation.zoneBottom or continuationTrendNow != 1 or na(modelTargetLong))
+        longContinuation.active := false
+    if shortContinuation.active and (bar_index - shortContinuation.started > continuationTTL or close > shortContinuation.zoneTop or continuationTrendNow != -1 or na(modelTargetShort))
+        shortContinuation.active := false
+    if continuationLtfUsable and continuationsOn
+        f_retestContinuation(longContinuation, 1, continuationTrendBeforeBar, lastSignalHighBar, not na(modelTargetLong) and continuationTrendNow == 1)
+        f_retestContinuation(shortContinuation, -1, continuationTrendBeforeBar, lastSignalLowBar, not na(modelTargetShort) and continuationTrendNow == -1)
+    [readyLong, processingLong, countLong, completedLong] = f_ready(longSetup, 1)
+    [readyShort, processingShort, countShort, completedShort] = f_ready(shortSetup, -1)
+    [readyCLong, processingCLong, countCLong, completedCLong] = f_ready(longContinuation, 1)
+    [readyCShort, processingCShort, countCShort, completedCShort] = f_ready(shortContinuation, -1)
+    longGapCount := countLong
+    shortGapCount := countShort
+    processLong := processingLong or processingCLong
+    processShort := processingShort or processingCShort
+    diagnosticLongStart := longSetup.active ? longSetup.started : na
+    diagnosticShortStart := shortSetup.active ? shortSetup.started : na
+    bool htfLong = longSetup.active and longSetup.delivered
+    bool htfShort = shortSetup.active and shortSetup.delivered
+    bool smtLong = not na(lastBullSMT) and bar_index - lastBullSMT <= confluenceTTL
+    bool smtShort = not na(lastBearSMT) and bar_index - lastBearSMT <= confluenceTTL
+    bool vLong = longSetup.active and bar_index - longSetup.started <= vTTL
+    bool vShort = shortSetup.active and bar_index - shortSetup.started <= vTTL
+    bool common = (not volumeFilter or displacement) and (not killFilter or inKillzone)
+    bool filterLong = common and biasInput != "Bearish" and (not dolFilter or dolLong) and (not smtFilter or smtLong)
+    bool filterShort = common and biasInput != "Bullish" and (not dolFilter or dolShort) and (not smtFilter or smtShort)
+    bool rLong = reversalLtfUsable and reversalsOn and readyLong and filterLong and (not vFilter or vLong) and (not onlyA or htfLong)
+    bool rShort = reversalLtfUsable and reversalsOn and readyShort and filterShort and (not vFilter or vShort) and (not onlyA or htfShort)
+    bool cLong = continuationLtfUsable and continuationsOn and readyCLong and continuationTrendNow == 1 and not na(modelTargetLong) and filterLong
+    bool cShort = continuationLtfUsable and continuationsOn and readyCShort and continuationTrendNow == -1 and not na(modelTargetShort) and filterShort
+    bool overlapLong = rLong and cLong
+    bool overlapShort = rShort and cShort
+    rLong := rLong and (not overlapLong or modelPriority == "R first")
+    rShort := rShort and (not overlapShort or modelPriority == "R first")
+    cLong := cLong and (not overlapLong or modelPriority == "C first")
+    cShort := cShort and (not overlapShort or modelPriority == "C first")
+    // If both directions satisfy conditions on the same bar, suppress ambiguity.
+    bool candidateLong = rLong or cLong
+    bool candidateShort = rShort or cShort
+    if candidateLong != candidateShort
+        int dir = candidateLong ? 1 : -1
+        bool reversal = candidateLong ? rLong : rShort
+        Setup selectedSetup = reversal ? (dir == 1 ? longSetup : shortSetup) : (dir == 1 ? longContinuation : shortContinuation)
+        f_drawLinkedGaps(selectedSetup, dir)
+        bool htf = selectedSetup.delivered
+        signalCode := dir * (reversal ? (htf ? 3 : 2) : 1)
+        checklistDirection := dir
+        checklistKind := reversal ? (htf ? "R+" : "R") : "C"
+        checklistTime := time
+        checklistHtfSource := htf ? selectedSetup.zoneTf : "-"
+        signalZoneTop := htf ? selectedSetup.zoneTop : na
+        signalZoneBottom := htf ? selectedSetup.zoneBottom : na
+        signalZoneTf := htf ? selectedSetup.zoneMinutes : na
+        signalSweepPrice := reversal ? selectedSetup.sweepPrice : na
+        float selectedTarget = dir == 1 ? modelTargetLong : modelTargetShort
+        checklistModelTarget := dir == 1 ? modelTargetLongSource : modelTargetShortSource
+        checklistModelTarget += not na(selectedTarget) ? " · " + str.tostring(selectedTarget, format.mintick) : ""
+        checklistDolSource := dir == 1 ? dolLongSource : dolShortSource
+        checklistDolSource += dir == 1 and not na(dolLongPrice) ? " · " + str.tostring(dolLongPrice, format.mintick) : dir == -1 and not na(dolShortPrice) ? " · " + str.tostring(dolShortPrice, format.mintick) : ""
+        checklist.set(0, macro)
+        // A reversal's sweep starts the setup; it usually precedes the signal bar.
+        checklist.set(1, reversal ? (dir == 1 ? longSetup.active : shortSetup.active) : (dir == 1 ? sweepLong : sweepShort))
+        checklist.set(2, htf)
+        checklist.set(3, displacement)
+        checklist.set(4, dir == 1 ? dolLong : dolShort)
+        bool ltfDol = dir == 1 ? not na(lastHigh) and lastHigh > close : not na(lastLow) and lastLow < close
+        checklist.set(5, ltfDol)
+        checklist.set(6, bar_index - selectedSetup.started <= vTTL)
+        checklist.set(7, dir == 1 ? smtLong : smtShort)
+        checklistCount := 0
+        for i = 0 to 7
+            checklistCount += checklist.get(i) ? 1 : 0
+        string signalTip = checklistKind + (dir == 1 ? "  ↑ Bullish" : "  ↓ Bearish") + "   ·   " + str.tostring(checklistCount) + "/8 observed confluences"
+        signalTip += "\n" + str.format_time(time_close, "dd/MM/yyyy HH:mm", zone) + " NY"
+        signalTip += "\n──────────────"
+        string metIcon = tooltipIcons == "Plain" ? "↑" : tooltipIcons == "Blue / orange" ? "🔵↑" : "🟢↑"
+        string unmetIcon = tooltipIcons == "Plain" ? "×" : tooltipIcons == "Blue / orange" ? "🟠×" : "❌"
+        array<string> detailNames = array.from("Macro", "Setup sweep", "Linked HTF delivery", "Displacement body/ATR", "Session DOL", "LTF DOL", "V-window", "Confirmed-pivot SMT")
+        for i = 0 to 7
+            signalTip += "\n" + (checklist.get(i) ? metIcon : unmetIcon) + "  " + detailNames.get(i)
+        signalTip += "\n──────────────"
+        signalTip += "\nHTF source: " + checklistHtfSource
+        signalTip += "\nAvailable session DOL: " + checklistDolSource
+        signalTip += "\nOrigin: " + selectedSetup.sweepSource
+        if reversal
+            signalTip += " · " + str.tostring(selectedSetup.sweepPrice, format.mintick)
+        if htf
+            signalTip += "\nDelivery zone: " + str.tostring(selectedSetup.zoneBottom, format.mintick) + "–" + str.tostring(selectedSetup.zoneTop, format.mintick)
+        signalTip += "\nModel DOL: " + checklistModelTarget
+        if time <= inspectTime and inspectTime < time_close
+            inspectedFound := true
+            inspectedDirection := dir
+            inspectedKind := checklistKind
+            inspectedHtfSource := checklistHtfSource
+            inspectedDolSource := checklistDolSource
+            inspectedModelTarget := checklistModelTarget
+            inspectedTime := time
+            inspectedCount := checklistCount
+            for i = 0 to 7
+                inspectedChecklist.set(i, checklist.get(i))
+            if signalsOn and inspectCallout and inspectMode == "Selected bar"
+                label.new(bar_index, dir == 1 ? low - atr : high + atr, checklistKind + " " + str.tostring(checklistCount) + "/8", yloc=yloc.price, style=f_labelStyle(reversal ? (htf ? rpMarker : rMarker) : cMarker, -dir), color=f_labelBackground(reversal ? (htf ? rpMarker : rMarker) : cMarker, dir == 1 ? bullColor : bearColor), textcolor=f_visualMode(reversal ? (htf ? rpMarker : rMarker) : cMarker) == "Text only" ? (dir == 1 ? bullColor : bearColor) : signalTextColor, size=size.small, tooltip=signalTip)
+        bool inVisibleWindow = time >= chart.left_visible_bar_time and time <= chart.right_visible_bar_time
+        bool drawHoverLabel = signalsOn and (not allHistoryMarkers or (visibleSignalTooltips and inVisibleWindow and signalLabels.size() < 250 and label.all.size() < 420))
+        if drawHoverLabel
+            string visibleKind = reversal ? reversalText + (htf ? "+" : "") : continuationText
+            label lab = label.new(bar_index, dir == 1 ? low : high, visibleKind, yloc=dir == 1 ? yloc.belowbar : yloc.abovebar, style=f_labelStyle(reversal ? (htf ? rpMarker : rMarker) : cMarker, -dir), color=f_labelBackground(reversal ? (htf ? rpMarker : rMarker) : cMarker, dir == 1 ? bullColor : bearColor), textcolor=f_visualMode(reversal ? (htf ? rpMarker : rMarker) : cMarker) == "Text only" ? (dir == 1 ? bullColor : bearColor) : signalTextColor, size=resolvedSignalSize, tooltip=signalTip)
+            signalLabels.push(lab)
+            signalDetailDrawn := allHistoryMarkers
+            if not allHistoryMarkers and signalLabels.size() > (recentSignals ? math.min(signalLimit, recentSignalCount) : signalLimit)
+                label.delete(signalLabels.shift())
+    // Consume confirmed setup even when an optional filter rejects it; don't enter late.
+    if readyLong
+        longSetup.active := false
+    if readyShort
+        shortSetup.active := false
+    if readyCLong
+        longContinuation.active := false
+    if readyCShort
+        shortContinuation.active := false
+
+    int dayKey = year(time, zone) * 10000 + month(time, zone) * 100 + dayofmonth(time, zone)
+    if dayKey != crDay
+        for crLine in array.from(current8HighLine, current8LowLine, current9HighLine, current9LowLine, current8OpenLine, current9OpenLine)
+            if not na(crLine)
+                line.set_extend(crLine, extend.none)
+                line.set_x2(crLine, time)
+        current8HighLine := na
+        current8LowLine := na
+        current9HighLine := na
+        current9LowLine := na
+        current8OpenLine := na
+        current9OpenLine := na
+        cr8hi := na
+        cr8lo := na
+        cr9hi := na
+        cr9lo := na
+        range8HighTouched := false
+        range8LowTouched := false
+        range9HighTouched := false
+        range9LowTouched := false
+    crDay := dayKey
+    if hourRangeUsable and hourTime != hourTime[1]
+        if hour(hourTime, zone) == 8
+            cr8hi := hourHigh
+            cr8lo := hourLow
+            if showCR and showCR8 and not na(hourHigh) and not na(hourLow)
+                current8HighLine := line.new(hourTime, hourHigh, time_close, hourHigh, xloc=xloc.bar_time, extend=extend.right, color=color.new(cr8Color, 35), width=cr8Width)
+                current8LowLine := line.new(hourTime, hourLow, time_close, hourLow, xloc=xloc.bar_time, extend=extend.right, color=color.new(cr8Color, 35), width=cr8Width)
+                crLines.push(current8HighLine)
+                crLines.push(current8LowLine)
+                if showCRTags and showLevelTags
+                    crTags.push(label.new(hourTime, f_tagY(hourHigh, 1, 1.0), "8H", xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(cr8Marker, 1), color=f_labelBackground(cr8Marker, resolvedTagBackground), textcolor=cr8Color, size=f_tagSize(cr8TagSize), tooltip="8AM NY range; known after the candle closes at 09:00"))
+                    crTags.push(label.new(hourTime, f_tagY(hourLow, -1, 1.0), "8L", xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(cr8Marker, -1), color=f_labelBackground(cr8Marker, resolvedTagBackground), textcolor=cr8Color, size=f_tagSize(cr8TagSize), tooltip="8AM NY range; known after the candle closes at 09:00"))
+                if showCR8Open and not na(hourOpen)
+                    current8OpenLine := line.new(hourTime, hourOpen, time_close, hourOpen, xloc=xloc.bar_time, extend=extend.right, color=color.new(cr8Color, 45), style=line.style_dotted, width=cr8Width)
+                    crLines.push(current8OpenLine)
+                    if showCRTags and showLevelTags
+                        crTags.push(label.new(hourTime, f_tagY(hourOpen, 1, 1.25), "8O", xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(cr8Marker, 1), color=f_labelBackground(cr8Marker, resolvedTagBackground), textcolor=cr8Color, size=f_tagSize(cr8TagSize), tooltip="8AM NY candle open"))
+        if hour(hourTime, zone) == 9
+            cr9hi := hourHigh
+            cr9lo := hourLow
+            if showCR and showCR9 and not na(hourHigh) and not na(hourLow)
+                current9HighLine := line.new(hourTime, hourHigh, time_close, hourHigh, xloc=xloc.bar_time, extend=extend.right, color=color.new(cr9Color, 35), width=cr9Width)
+                current9LowLine := line.new(hourTime, hourLow, time_close, hourLow, xloc=xloc.bar_time, extend=extend.right, color=color.new(cr9Color, 35), width=cr9Width)
+                crLines.push(current9HighLine)
+                crLines.push(current9LowLine)
+                if showCRTags and showLevelTags
+                    crTags.push(label.new(hourTime, f_tagY(hourHigh, 1, 1.0), "9H", xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(cr9Marker, 1), color=f_labelBackground(cr9Marker, resolvedTagBackground), textcolor=cr9Color, size=f_tagSize(cr9TagSize), tooltip="9AM NY range; known after the candle closes at 10:00"))
+                    crTags.push(label.new(hourTime, f_tagY(hourLow, -1, 1.0), "9L", xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(cr9Marker, -1), color=f_labelBackground(cr9Marker, resolvedTagBackground), textcolor=cr9Color, size=f_tagSize(cr9TagSize), tooltip="9AM NY range; known after the candle closes at 10:00"))
+                if showCR9Open and not na(hourOpen)
+                    current9OpenLine := line.new(hourTime, hourOpen, time_close, hourOpen, xloc=xloc.bar_time, extend=extend.right, color=color.new(cr9Color, 45), style=line.style_dotted, width=cr9Width)
+                    crLines.push(current9OpenLine)
+                    if showCRTags and showLevelTags
+                        crTags.push(label.new(hourTime, f_tagY(hourOpen, 1, 1.25), "9O", xloc=xloc.bar_time, yloc=yloc.price, style=f_labelStyle(cr9Marker, 1), color=f_labelBackground(cr9Marker, resolvedTagBackground), textcolor=cr9Color, size=f_tagSize(cr9TagSize), tooltip="9AM NY candle open"))
+        while crLines.size() > 80
+            line.delete(crLines.shift())
+        while crTags.size() > 80
+            label.delete(crTags.shift())
+
+    // First wick contact with each closed hourly range per NY day; no intrabar alerts.
+    range8HighTap := not range8HighTouched and not na(cr8hi) and high >= cr8hi and low <= cr8hi
+    range8LowTap := not range8LowTouched and not na(cr8lo) and high >= cr8lo and low <= cr8lo
+    range9HighTap := not range9HighTouched and not na(cr9hi) and high >= cr9hi and low <= cr9hi
+    range9LowTap := not range9LowTouched and not na(cr9lo) and high >= cr9lo and low <= cr9lo
+    range8HighTouched := range8HighTouched or range8HighTap
+    range8LowTouched := range8LowTouched or range8LowTap
+    range9HighTouched := range9HighTouched or range9HighTap
+    range9LowTouched := range9LowTouched or range9LowTap
+
+string resolvedPanelPosition = panelPosition == "Top right" ? position.top_right : panelPosition == "Top left" ? position.top_left : panelPosition == "Bottom left" ? position.bottom_left : position.bottom_right
+string resolvedPanelTextSize = panelSize == "Tiny" ? size.tiny : panelSize == "Normal" ? size.normal : size.small
+string resolvedStatusSize = statusSize == "Tiny" ? size.tiny : statusSize == "Normal" ? size.normal : size.small
+bool panelHasSignal = inspectMode == "Latest" ? checklistDirection != 0 : inspectedFound
+int panelDirection = inspectMode == "Latest" ? checklistDirection : inspectedDirection
+string panelKind = inspectMode == "Latest" ? checklistKind : inspectedKind
+int panelSignalTime = inspectMode == "Latest" ? checklistTime : inspectedTime
+int panelCount = inspectMode == "Latest" ? checklistCount : inspectedCount
+string panelHtfSource = inspectMode == "Latest" ? checklistHtfSource : inspectedHtfSource
+string panelDolSource = inspectMode == "Latest" ? checklistDolSource : inspectedDolSource
+string panelModelTarget = inspectMode == "Latest" ? checklistModelTarget : inspectedModelTarget
+var table panel = table.new(resolvedPanelPosition, 2, 16, border_width=1, border_color=panelBorder)
+var table watermark = table.new(position.bottom_center, 1, 1)
+if barstate.islast and watermarkOn
+    table.cell(watermark, 0, 0, "LI Lab 0.27 EN\n" + syminfo.ticker + " / " + timeframe.period, text_color=panelText, bgcolor=panelBackground, text_size=size.tiny)
+if barstate.islast and showChecklist
+    table.cell(panel, 0, 0, "LI LAB 0.27 EN", text_color=color.orange, bgcolor=color.black, text_size=resolvedPanelTextSize)
+    table.cell(panel, 1, 0, "CONFLUENCES", text_color=color.orange, bgcolor=color.black, text_size=resolvedPanelTextSize)
+    table.cell(panel, 0, 1, inspectMode == "Latest" ? "Latest signal" : "Selected bar", text_color=panelText, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    table.cell(panel, 1, 1, panelKind, text_color=panelDirection == 1 ? bullColor : panelDirection == -1 ? bearColor : color.gray, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    table.cell(panel, 0, 2, "NY time", text_color=panelText, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    table.cell(panel, 1, 2, panelHasSignal ? str.format_time(panelSignalTime, "MM-dd HH:mm", zone) : "-", text_color=panelText, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    table.cell(panel, 0, 3, "Confluences", text_color=panelText, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    table.cell(panel, 1, 3, panelHasSignal ? str.tostring(panelCount) + "/8" : "-", text_color=metColor, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    array<string> names = array.from("Macro", "Setup sweep", "Linked delivery*", "Displacement/ATR*", "Session DOL*", "LTF DOL*", "V-window*", "SMT pivots*")
+    for i = 0 to 7
+        bool ok = inspectMode == "Latest" ? checklist.get(i) : inspectedChecklist.get(i)
+        table.cell(panel, 0, i + 4, names.get(i), text_color=panelText, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+        table.cell(panel, 1, i + 4, not panelHasSignal ? "-" : ok ? "↑" : "×", text_color=not panelHasSignal ? color.gray : ok ? metColor : unmetColor, bgcolor=panelBackground, text_size=resolvedStatusSize)
+    table.cell(panel, 0, 12, "HTF source*", text_color=panelText, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    table.cell(panel, 1, 12, panelHasSignal ? panelHtfSource : "-", text_color=panelText, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    table.cell(panel, 0, 13, "Session DOL", text_color=panelText, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    table.cell(panel, 1, 13, panelHasSignal ? panelDolSource : "-", text_color=panelText, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    table.cell(panel, 0, 14, "Model DOL", text_color=panelText, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    table.cell(panel, 1, 14, panelHasSignal ? panelModelTarget : "-", text_color=panelText, bgcolor=panelBackground, text_size=resolvedPanelTextSize)
+    table.cell(panel, 0, 15, "Laboratory criteria", text_color=color.gray, bgcolor=color.black, text_size=size.tiny)
+    table.cell(panel, 1, 15, "Not a win rate", text_color=color.gray, bgcolor=color.black, text_size=size.tiny)
+
+plot(showPriorDay ? priorDH : na, "Previous day high / PDH", color=priorLevelColor, linewidth=priorWidth, style=plot.style_stepline)
+plot(showPriorDay ? priorDL : na, "Previous day low / PDL", color=priorLevelColor, linewidth=priorWidth, style=plot.style_stepline)
+// These retrospective drawings start at their source hour. The ranges are only known
+// after the hourly candle closes; alert calculations above are never backdated.
+// Current period OPEN is fixed at period start; no future high/low/close is requested.
+dayOpen = request.security(syminfo.tickerid, "D", open, lookahead=barmerge.lookahead_on)
+weekOpen = request.security(syminfo.tickerid, "W", open, lookahead=barmerge.lookahead_on)
+priorWeekClose = request.security(syminfo.tickerid, "W", close[1], lookahead=barmerge.lookahead_on)
+monthOpen = request.security(syminfo.tickerid, "M", open, lookahead=barmerge.lookahead_on)
+if barstate.isconfirmed and timeframe.change("W")
+    if nwogBoxes.size() > 0
+        box latestNwog = nwogBoxes.get(nwogBoxes.size() - 1)
+        box.set_extend(latestNwog, extend.none)
+        box.set_right(latestNwog, time)
+    if showNWOG and not na(priorWeekClose) and not na(weekOpen) and math.abs(weekOpen - priorWeekClose) >= syminfo.mintick
+        box weeklyGap = box.new(time, math.max(weekOpen, priorWeekClose), time_close, math.min(weekOpen, priorWeekClose), xloc=xloc.bar_time, extend=extend.right, border_color=nwogColor, bgcolor=color.new(nwogColor, 86), text="NWOG", text_color=nwogColor, text_size=size.tiny)
+        nwogBoxes.push(weeklyGap)
+        if nwogBoxes.size() > 8
+            box.delete(nwogBoxes.shift())
+plot(showDayOpen ? dayOpen : na, "Day open / DO", color=dayOpenColor, linewidth=dayWidth, style=plot.style_stepline)
+plot(showWeekOpen ? weekOpen : na, "Week open / WO", color=weekOpenColor, linewidth=weekWidth, style=plot.style_stepline)
+bool sameOpenEvent = showOpenTags and showDayOpen and showWeekOpen and timeframe.change("W") and math.abs(dayOpen - weekOpen) <= syminfo.mintick
+// Keep viewport event labels inside a separate, bounded object pool.
+bool eventVisible = time >= chart.left_visible_bar_time and time <= chart.right_visible_bar_time
+if barstate.isconfirmed and eventVisible and eventTags.size() < 80
+    if sameOpenEvent
+        eventTags.push(label.new(bar_index, f_tagY(dayOpen, 1, 1.25), "DO/WO", yloc=yloc.price, style=f_labelStyle(dayMarker, 1), color=f_labelBackground(dayMarker, resolvedTagBackground), textcolor=dayOpenColor, size=f_tagSize(dayTagSize)))
+    else
+        if showOpenTags and showDayOpen and timeframe.change("D")
+            eventTags.push(label.new(bar_index, f_tagY(dayOpen, 1, 1.25), "DO", yloc=yloc.price, style=f_labelStyle(dayMarker, 1), color=f_labelBackground(dayMarker, resolvedTagBackground), textcolor=dayOpenColor, size=f_tagSize(dayTagSize)))
+        if showOpenTags and showWeekOpen and timeframe.change("W") and eventTags.size() < 80
+            eventTags.push(label.new(bar_index, f_tagY(weekOpen, 1, 1.25), "WO", yloc=yloc.price, style=f_labelStyle(weekMarker, 1), color=f_labelBackground(weekMarker, resolvedTagBackground), textcolor=weekOpenColor, size=f_tagSize(weekTagSize)))
+var array<label> referenceTags = array.new<label>()
+var array<line> optionalReferenceLines = array.new<line>()
+if barstate.islast
+    for tag in referenceTags
+        label.delete(tag)
+    referenceTags.clear()
+    for lineRef in optionalReferenceLines
+        line.delete(lineRef)
+    optionalReferenceLines.clear()
+    int referenceStart = math.max(0, bar_index - 250)
+    if showMonthOpen and not na(monthOpen)
+        optionalReferenceLines.push(line.new(referenceStart, monthOpen, bar_index + openTagOffset, monthOpen, color=monthOpenColor, width=monthWidth))
+    if showPriorWeek and not na(priorWH) and not na(priorWL)
+        optionalReferenceLines.push(line.new(referenceStart, priorWH, bar_index + openTagOffset, priorWH, color=color.new(priorLevelColor, 20), width=priorWidth))
+        optionalReferenceLines.push(line.new(referenceStart, priorWL, bar_index + openTagOffset, priorWL, color=color.new(priorLevelColor, 20), width=priorWidth))
+    if showPriorMonth and not na(priorMH) and not na(priorML)
+        optionalReferenceLines.push(line.new(referenceStart, priorMH, bar_index + openTagOffset, priorMH, color=color.new(priorLevelColor, 35), width=priorWidth))
+        optionalReferenceLines.push(line.new(referenceStart, priorML, bar_index + openTagOffset, priorML, color=color.new(priorLevelColor, 35), width=priorWidth))
+    if showOpenTags
+        bool sameCurrentOpen = showDayOpen and showWeekOpen and math.abs(dayOpen - weekOpen) <= syminfo.mintick
+        if sameCurrentOpen
+            bool sameMonthOpen = showMonthOpen and math.abs(dayOpen - monthOpen) <= syminfo.mintick
+            referenceTags.push(f_referenceTag(dayOpen, sameMonthOpen ? "DO / WO / MO" : "DO / WO", dayOpenColor))
+        else
+            if showDayOpen
+                referenceTags.push(f_referenceTag(dayOpen, "DO", dayOpenColor))
+            if showWeekOpen
+                referenceTags.push(f_referenceTag(weekOpen, "WO", weekOpenColor))
+        if showMonthOpen and (not sameCurrentOpen or math.abs(dayOpen - monthOpen) > syminfo.mintick)
+            referenceTags.push(f_referenceTag(monthOpen, "MO", monthOpenColor))
+    if showPriorTags
+        if showPriorDay
+            referenceTags.push(f_referenceTag(priorDH, "PDH", priorLevelColor))
+            referenceTags.push(f_referenceTag(priorDL, "PDL", priorLevelColor))
+        if showPriorWeek
+            referenceTags.push(f_referenceTag(priorWH, "PWH", priorLevelColor))
+            referenceTags.push(f_referenceTag(priorWL, "PWL", priorLevelColor))
+        if showPriorMonth
+            referenceTags.push(f_referenceTag(priorMH, "PMH", priorLevelColor))
+            referenceTags.push(f_referenceTag(priorML, "PML", priorLevelColor))
+// plotshape renders a historical series without consuming the finite label-object pool.
+// Detailed labels replace the fixed marker on visible bars. The fixed series remains
+// available on older bars and when the 250-label hover budget is exhausted.
+plotshape(showSMT and smtHistoryMarkers and smtBull, "Confirmed bullish SMT vs peer", shape.labelup, location.belowbar, color(na), text="SMT", textcolor=color.rgb(20, 195, 142), size=size.tiny)
+plotshape(showSMT and smtHistoryMarkers and smtBear, "Confirmed bearish SMT vs peer", shape.labeldown, location.abovebar, color(na), text="SMT", textcolor=color.rgb(255, 70, 78), size=size.tiny)
+plotshape(signalsOn and allHistoryMarkers and not signalDetailDrawn and signalCode == 1, "C long history", shape.labelup, location.belowbar, color(na), text="C", textcolor=color.rgb(20, 195, 142), size=size.small)
+plotshape(signalsOn and allHistoryMarkers and not signalDetailDrawn and signalCode == -1, "C short history", shape.labeldown, location.abovebar, color(na), text="C", textcolor=color.rgb(255, 70, 78), size=size.small)
+plotshape(signalsOn and allHistoryMarkers and not signalDetailDrawn and signalCode == 2, "R long history", shape.labelup, location.belowbar, color(na), text="R", textcolor=color.rgb(20, 195, 142), size=size.small)
+plotshape(signalsOn and allHistoryMarkers and not signalDetailDrawn and signalCode == -2, "R short history", shape.labeldown, location.abovebar, color(na), text="R", textcolor=color.rgb(255, 70, 78), size=size.small)
+plotshape(signalsOn and allHistoryMarkers and not signalDetailDrawn and signalCode == 3, "R+ long history", shape.labelup, location.belowbar, color(na), text="R+", textcolor=color.rgb(20, 195, 142), size=size.small)
+plotshape(signalsOn and allHistoryMarkers and not signalDetailDrawn and signalCode == -3, "R+ short history", shape.labeldown, location.abovebar, color(na), text="R+", textcolor=color.rgb(255, 70, 78), size=size.small)
+// Stable machine-readable exports: 0 none; +/-1 C; +/-2 R; +/-3 R+.
+plot(signalCode, "LAB signal code", display=display.data_window)
+plot(sweepLong ? 1 : 0, "LAB sellside sweep", display=display.data_window)
+plot(sweepShort ? 1 : 0, "LAB buyside sweep", display=display.data_window)
+plot(signalZoneTop, "LAB model zone top", display=display.data_window)
+plot(signalZoneBottom, "LAB model zone bottom", display=display.data_window)
+plot(signalZoneTf, "LAB model zone minutes", display=display.data_window)
+plot(signalSweepPrice, "LAB model sweep price", display=display.data_window)
+
+alertcondition(newBull1, "TF1 Bullish FVG Found", "LI Lab: closed TF1 bullish FVG")
+alertcondition(newBear1, "TF1 Bearish FVG Found", "LI Lab: closed TF1 bearish FVG")
+alertcondition(newBull2, "TF2 Bullish FVG Found", "LI Lab: closed TF2 bullish FVG")
+alertcondition(newBear2, "TF2 Bearish FVG Found", "LI Lab: closed TF2 bearish FVG")
+alertcondition(newBull3, "4H Bullish FVG Found", "LI Lab: closed 4H bullish FVG")
+alertcondition(newBear3, "4H Bearish FVG Found", "LI Lab: closed 4H bearish FVG")
+alertcondition(touch1 and not touch1[1], "Price Tagged HTF1 FVG", "LI Lab: HTF1 contact")
+alertcondition(touch2 and not touch2[1], "Price Tagged HTF2 FVG", "LI Lab: HTF2 contact")
+alertcondition(touch3 and not touch3[1], "Price Tagged 4H FVG", "LI Lab: 4H contact")
+alertcondition(mid1 and not mid1[1], "Price Crossed HTF1 FVG 50%", "LI Lab: HTF1 midpoint")
+alertcondition(mid2 and not mid2[1], "Price Crossed HTF2 FVG 50%", "LI Lab: HTF2 midpoint")
+alertcondition(mid3 and not mid3[1], "Price Crossed 4H FVG 50%", "LI Lab: 4H midpoint")
+alertcondition(processLong and not processLong[1], "Possible Long (Inversing)", "LI Lab: long inversion process")
+alertcondition(processShort and not processShort[1], "Possible Short (Inversing)", "LI Lab: short inversion process")
+alertcondition(lrlBull, "Bullish LRL Formed", "LI Lab: bullish LRL hypothesis")
+alertcondition(lrlBear, "Bearish LRL Formed", "LI Lab: bearish LRL hypothesis")
+alertcondition(lrlBull or lrlBear, "LRL Formed", "LI Lab: LRL hypothesis")
+alertcondition(smtBull, "Bullish SMT", "LI Lab: bullish SMT hypothesis")
+alertcondition(smtBear, "Bearish SMT", "LI Lab: bearish SMT hypothesis")
+alertcondition(smtBull or smtBear, "SMT Any", "LI Lab: SMT hypothesis")
+alertcondition(sweepLong, "Liquidity Sweep Sellside", "LI Lab: sellside swept and reclaimed")
+alertcondition(sweepShort, "Liquidity Sweep Buyside", "LI Lab: buyside swept and reclaimed")
+alertcondition(signalCode == 3, "A+ Reversal Long", "LI Lab: experimental R+ long")
+alertcondition(signalCode == -3, "A+ Reversal Short", "LI Lab: experimental R+ short")
+alertcondition(signalCode >= 2, "Reversal Long", "LI Lab: experimental reversal long")
+alertcondition(signalCode <= -2, "Reversal Short", "LI Lab: experimental reversal short")
+alertcondition(signalCode == 1, "Continuation Long", "LI Lab: experimental continuation long")
+alertcondition(signalCode == -1, "Continuation Short", "LI Lab: experimental continuation short")
+alertcondition(signalCode > 0 and checklist.get(7), "Long + SMT", "LI Lab: experimental long with SMT")
+alertcondition(signalCode < 0 and checklist.get(7), "Short + SMT", "LI Lab: experimental short with SMT")
+alertcondition(range8HighTap, "8AM CR High Tap", "LI Lab: first confirmed wick contact with 8AM high")
+alertcondition(range8LowTap, "8AM CR Low Tap", "LI Lab: first confirmed wick contact with 8AM low")
+alertcondition(range9HighTap, "9AM CR High Tap", "LI Lab: first confirmed wick contact with 9AM high")
+alertcondition(range9LowTap, "9AM CR Low Tap", "LI Lab: first confirmed wick contact with 9AM low")
+alertcondition(londonSweptAsiaHigh, "London Swept Asia High", "LI Lab: London wick swept the prior Asia high")
+alertcondition(londonSweptAsiaLow, "London Swept Asia Low", "LI Lab: London wick swept the prior Asia low")
+alertcondition(nySweptAsiaHigh, "NY Swept Asia High", "LI Lab: New York wick swept the prior Asia high")
+alertcondition(nySweptAsiaLow, "NY Swept Asia Low", "LI Lab: New York wick swept the prior Asia low")
+alertcondition(nySweptLondonHigh, "NY Swept London High", "LI Lab: New York wick swept the prior London high")
+alertcondition(nySweptLondonLow, "NY Swept London Low", "LI Lab: New York wick swept the prior London low")

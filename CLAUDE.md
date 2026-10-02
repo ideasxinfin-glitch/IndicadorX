@@ -36,6 +36,12 @@ Read this file before changing the TradingView Pine indicator. The user wants to
 - Next: compile v27 in TradingView, inspect 30s and 1m; compare v26/v27 with matched inputs, first using “Custom / v26” geometry then Balanced; inspect signal-linked FVG boxes, LRL expiry, and runtime/object limits. Export same-period, same-timezone **ES1! 1m OHLC** to check the SMT pivot pairs alongside NQ.
 - Inspect Pine `request.security`, confirmed-bar behavior, object limits, history handling, alert/plot budget and the user's loaded settings before changing code. Avoid lookahead/repainting claims unless verified.
 
+## Repository state (GitHub `IndicadorX`, started 2026-10-02)
+
+- The repo was seeded with only this file plus the 0.27 source the user pasted into chat: `outputs/Liquidity-Inversion-Lab-v27-visual.pine`. The first line of the paste read `/@version=6`, an apparent copy truncation; it was restored to `//@version=6`. Nothing else was changed.
+- **Not yet in the repo:** the v26 rollback source, the release notes, audits, CSV comparisons, the delivery zip and the `work/` scripts listed below. They exist only on the user's machine. Do not recreate them from memory. Ask the user to upload them, starting with v26.
+- Static counts for the v27 file: 15 `request.security` calls, 19 plot/plotshape calls, 40 `alertcondition` calls. These are counts only; nothing has been compiled.
+
 ## Important project files
 
 - Current installed/reference source: `outputs/Liquidity-Inversion-Lab-v26-gap-age.pine`
