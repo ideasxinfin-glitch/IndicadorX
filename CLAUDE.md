@@ -42,6 +42,8 @@ Read this file before changing the TradingView Pine indicator. The user wants to
 - **Not yet in the repo:** the v26 rollback source, the release notes, audits, CSV comparisons, the delivery zip and the `work/` scripts listed below. They exist only on the user's machine. Do not recreate them from memory. Ask the user to upload them, starting with v26.
 - Static counts for the v27 file: 15 `request.security` calls, 19 plot/plotshape calls, 40 `alertcondition` calls. These are counts only; nothing has been compiled.
 
+- **0.28 (`outputs/Liquidity-Inversion-Lab-v28-performance.pine`) is a load-time candidate built from 0.27** by `work/build_v28_performance.py`: scoped `max_bars_back`, D/W/M request merge (15 → 11 calls), signal-linked chart-gap retention = `signalGapAge`. Intended to be behavior-identical; not compiled or compared. See `outputs/Release-v28-performance.md`.
+
 ## Important project files
 
 - Current installed/reference source: `outputs/Liquidity-Inversion-Lab-v26-gap-age.pine`
